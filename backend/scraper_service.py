@@ -743,17 +743,63 @@ class ScraperService:
         supplier_name_lower = supplier['name'].lower()
         supplier_url_lower = supplier.get('url_login', '').lower()
         
-        # Use ScrapingBee for all suppliers (session-based)
-        logger.info(f"Using ScrapingBee adapter for {supplier['name']}")
-        adapter = ScrapingBeeAdapter(
-            supplier_id=supplier_id,
-            supplier_name=supplier['name'],
-            url_login=supplier['url_login'],
-            url_search=supplier['url_search'],
-            username=supplier['username'],
-            password=supplier['password'],
-            selectors=supplier.get('selectors')
-        )
+        # Select appropriate adapter based on supplier
+        if 'mp24' in supplier_name_lower or 'mp24' in supplier_url_lower:
+            logger.info(f"Using MP24Adapter for {supplier['name']}")
+            adapter = MP24Adapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        elif 'prismanil' in supplier_name_lower or 'prismanil' in supplier_url_lower:
+            logger.info(f"Using PrismanilAdapter for {supplier['name']}")
+            adapter = PrismanilAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        elif 'sjose' in supplier_name_lower or 'sjose' in supplier_url_lower:
+            logger.info(f"Using SJoseAdapter for {supplier['name']}")
+            adapter = SJoseAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        elif 'euromais' in supplier_name_lower or 'eurotyre' in supplier_url_lower:
+            logger.info(f"Using EuromaisAdapter for {supplier['name']}")
+            adapter = EuromaisAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        else:
+            # Default: Use SJoseAdapter as generic fallback
+            logger.info(f"Using generic SJoseAdapter for {supplier['name']}")
+            adapter = SJoseAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
         
         self.adapters[supplier_id] = adapter
         return adapter
