@@ -416,38 +416,45 @@ class EuromaisAdapter(ScraperBase):
             
             await asyncio.sleep(1)
             
-            # Find search input
-            search_input = self.page.locator('input[type="text"], input[type="search"], input[placeholder*="Pesquis"]').first
-            await search_input.clear()
-            await search_input.fill(medida_normalized)
-            logger.info(f"Filled search: {medida_normalized}")
-            await asyncio.sleep(0.5)
-            
-            # Submit search
-            search_button = self.page.locator('button[type="submit"], button:has-text("Pesquisar"), input[type="submit"]').first
-            if await search_button.count() > 0:
-                await search_button.click()
+            # Find and fill search input (first text input on catalog page)
+            search_inputs = await self.page.locator('input[type="text"]').all()
+            if search_inputs:
+                await search_inputs[0].clear()
+                await search_inputs[0].fill(medida_normalized)
+                logger.info(f"Filled search: {medida_normalized}")
+                await asyncio.sleep(1)
+                
+                # Press Enter or click search icon
+                await search_inputs[0].press("Enter")
+                logger.info("Submitted search")
             else:
-                await search_input.press("Enter")
+                logger.warning("No search input found")
+                return None
             
-            await asyncio.sleep(3)
+            # Wait for results
+            await asyncio.sleep(4)
             await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
             
             await self.take_screenshot(f"search_results_{medida_normalized}")
             
+            # Get page content
             content = await self.page.content()
             
             # Check for no results
-            if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto"]):
+            if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto", "nenhum registo"]):
                 logger.info(f"No results for {medida_normalized}")
                 return None
             
-            # Extract prices - PT format (XX,XX€)
+            # Extract prices from PREÇO column (based on screenshot)
+            # Prices appear in format: € 36.99, € 29.98, etc.
             import re
+            
+            # Multiple patterns for PT price format
             price_patterns = [
-                r'(\d+[,\.]\d{2})\s*€',
-                r'€\s*(\d+[,\.]\d{2})',
-                r'price["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
+                r'€\s*(\d+[,\.]\d{2})',  # € 36.99 or € 36,99
+                r'(\d+[,\.]\d{2})\s*€',  # 36.99€ or 36,99€
+                r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',  # JSON price
+                r'PREÇO.*?€\s*(\d+[,\.]\d{2})',  # After PREÇO label
             ]
             
             found_prices = []
@@ -457,17 +464,22 @@ class EuromaisAdapter(ScraperBase):
                     try:
                         price_str = match.replace(',', '.')
                         price = float(price_str)
-                        if 10 < price < 1000:
+                        # Reasonable tire price range
+                        if 15 < price < 500:
                             found_prices.append(price)
+                            logger.debug(f"Found price: €{price}")
                     except ValueError:
                         continue
             
             if found_prices:
+                # Remove duplicates and get lowest
+                found_prices = list(set(found_prices))
                 best_price = min(found_prices)
-                logger.info(f"Found {len(found_prices)} prices, lowest: €{best_price}")
+                logger.info(f"Found {len(found_prices)} unique prices, lowest: €{best_price}")
                 return best_price
             
-            logger.warning(f"No valid prices found for {medida_normalized}")
+            logger.warning(f"No valid prices extracted for {medida_normalized}")
+            return None
             return None
             
         except Exception as e:
