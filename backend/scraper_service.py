@@ -591,14 +591,25 @@ class ScrapingBeeAdapter(ScraperBase):
             medida_normalized = self.normalize_medida(medida)
             logger.info(f"ScrapingBee search: {medida} → {medida_normalized} | Session: {self.session_id}")
             
-            # Use authenticated session to search
-            # Build search URL based on supplier
-            if 'eurotyre' in self.url_search.lower() or 'euromais' in self.supplier_name.lower():
+            # Build search URLs based on supplier
+            supplier_lower = self.supplier_name.lower()
+            
+            if 'mp24' in supplier_lower:
+                search_urls = [
+                    f"https://pt.mp24.online/pt_PT/search?q={medida_normalized}",
+                    f"https://pt.mp24.online/pt_PT/tires?size={medida_normalized}",
+                ]
+            elif 'prismanil' in supplier_lower:
+                search_urls = [
+                    f"https://www.prismanil.pt/b2b/pesquisa?medida={medida_normalized}",
+                    f"https://www.prismanil.pt/b2b/pneus?search={medida_normalized}",
+                ]
+            elif 'eurotyre' in supplier_lower or 'euromais' in supplier_lower:
                 search_urls = [
                     f"https://www.eurotyre.pt/pt/pesquisa?q={medida_normalized}",
                     f"https://www.eurotyre.pt/pneus/{medida_normalized}",
                 ]
-            elif 'sjose' in self.supplier_name.lower() or 'jose' in self.supplier_name.lower():
+            elif 'sjose' in supplier_lower or 'jose' in supplier_lower:
                 search_urls = [
                     f"https://b2b.sjosepneus.com/articles.aspx?search={medida_normalized}",
                     f"https://b2b.sjosepneus.com/default.aspx?medida={medida_normalized}",
