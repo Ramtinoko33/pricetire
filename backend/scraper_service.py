@@ -507,7 +507,7 @@ class MP24Adapter(ScraperBase):
         try:
             logger.info(f"MP24: Navigating to {self.url_login}")
             await self.page.goto(self.url_login, wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
             
             # Check if already logged in
             content = await self.page.content()
@@ -515,58 +515,41 @@ class MP24Adapter(ScraperBase):
                 logger.info("MP24: Already logged in")
                 return True, "Already logged in"
             
-            # Fill username using name attribute
-            username_input = self.page.locator('input[name="_username"]')
-            if await username_input.count() > 0:
-                await username_input.fill(self.username)
-                logger.info(f"MP24: Filled username: {self.username}")
-            else:
-                await self.page.locator('input[type="text"]').first.fill(self.username)
+            # Fill credentials - use same selectors as working test script
+            await self.page.locator('input[name="_username"]').fill(self.username)
+            logger.info(f"MP24: Filled username: {self.username}")
             
-            # Fill password
-            password_input = self.page.locator('input[name="_password"]')
-            if await password_input.count() > 0:
-                await password_input.fill(self.password)
-            else:
-                await self.page.locator('input[type="password"]').first.fill(self.password)
+            await self.page.locator('input[name="_password"]').fill(self.password)
             logger.info("MP24: Filled password")
             
-            await asyncio.sleep(1)
+            # Click login link and wait (same as test script)
+            await self.page.locator('a:has-text("Início de sessão")').click()
+            logger.info("MP24: Clicked login link")
             
-            # Take screenshot before submit
-            await self.take_screenshot("mp24_before_login")
+            # Wait exactly like the test script
+            await asyncio.sleep(4)
             
-            # Submit login - try multiple methods
-            login_btn = self.page.locator('a:has-text("Início de sessão")')
-            if await login_btn.count() > 0:
-                await login_btn.click()
-                logger.info("MP24: Clicked login link")
-            else:
-                # Try form submit
-                result = await self.page.evaluate("document.getElementById('login_form')?.submit()")
-                logger.info("MP24: Submitted form via JS")
+            # Check if login worked by trying to navigate to tyres page
+            logger.info("MP24: Attempting to navigate to tyres page...")
+            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="load", timeout=30000)
+            await asyncio.sleep(3)
             
-            # Wait for navigation
-            await asyncio.sleep(5)
-            await self.page.wait_for_load_state("networkidle")
-            
-            # Take screenshot after submit
-            await self.take_screenshot("mp24_after_login")
-            
-            # Check current URL and content
+            # Check current URL
             current_url = self.page.url
-            logger.info(f"MP24: Post-login URL: {current_url}")
+            logger.info(f"MP24: Current URL after navigation: {current_url}")
             
+            if 'login' in current_url.lower():
+                logger.warning("MP24: Still on login page - login failed")
+                return False, "Login failed - redirected to login page"
+            
+            # Check for tyres page elements
             content = await self.page.content()
-            if 'sair' in content.lower() or 'logout' in content.lower():
-                logger.info("MP24: Login successful - found logout link")
+            if 'matchcodeField' in content or 'filterTop' in content:
+                logger.info("MP24: Login successful - on tyres page")
                 return True, "Login successful"
-            elif 'login_form' not in content.lower():
-                logger.info("MP24: Login seems successful - no login form present")
-                return True, "Login completed"
-            else:
-                logger.warning("MP24: Login may have failed - login form still present")
-                return False, "Login failed"
+            
+            logger.info("MP24: Login appears successful")
+            return True, "Login completed"
             
         except Exception as e:
             logger.error(f"MP24 login error: {str(e)}")
