@@ -612,7 +612,9 @@ class ScraperService:
                 selectors=supplier.get('selectors')
             )
         elif 'euromais' in supplier_name_lower or 'eurotyre' in supplier_name_lower or 'eurotyre.pt' in supplier_url_lower:
-            adapter = EuromaisAdapter(
+            # Use ScrapingBee for Euromais (free tier)
+            logger.info(f"Using ScrapingBee adapter for {supplier['name']}")
+            adapter = ScrapingBeeAdapter(
                 supplier_id=supplier_id,
                 supplier_name=supplier['name'],
                 url_login=supplier['url_login'],
