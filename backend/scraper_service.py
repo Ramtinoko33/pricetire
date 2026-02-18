@@ -32,7 +32,10 @@ class ScraperBase(ABC):
     async def init_browser(self):
         """Initialize browser and page"""
         playwright = await async_playwright().start()
-        self.browser = await playwright.chromium.launch(headless=True)
+        self.browser = await playwright.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        )
         self.page = await self.browser.new_page()
         self.page.set_default_timeout(30000)  # 30s timeout
         
