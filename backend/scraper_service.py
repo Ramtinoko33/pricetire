@@ -918,35 +918,49 @@ class ScraperService:
     
     async def scrape_product(self, supplier: Dict[str, Any], medida: str, marca: str, 
                             modelo: str, indice: str) -> Optional[float]:
-        """Scrape single product from supplier"""
+        """Scrape single product from supplier - creates fresh browser for each call"""
         adapter = self.get_adapter(supplier)
         
-        # Initialize browser if not already done
-        if not adapter.page:
+        try:
+            # Always create fresh browser for isolation
             await adapter.init_browser()
-            # Login first
+            
+            # Login
             success, message = await adapter.login()
             if not success:
                 logger.error(f"Login failed for {supplier['name']}: {message}")
+                await adapter.close_browser()
                 return None
-        
-        # Search product with retry logic
-        max_retries = 2
-        for attempt in range(max_retries):
+            
+            # Search product with retry logic
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    price = await adapter.search_product(medida, marca, modelo, indice)
+                    if price is not None:
+                        await adapter.close_browser()
+                        return price
+                    # If not found but no error, return None (not found)
+                    if attempt == max_retries - 1:
+                        await adapter.close_browser()
+                        return None
+                except Exception as e:
+                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt == max_retries - 1:
+                        await adapter.close_browser()
+                        return None
+                    await asyncio.sleep(1)  # Wait before retry
+            
+            await adapter.close_browser()
+            return None
+            
+        except Exception as e:
+            logger.error(f"Scrape error for {supplier['name']}: {str(e)}")
             try:
-                price = await adapter.search_product(medida, marca, modelo, indice)
-                if price is not None:
-                    return price
-                # If not found but no error, return None (not found)
-                if attempt == max_retries - 1:
-                    return None
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                if attempt == max_retries - 1:
-                    return None
-                await asyncio.sleep(1)  # Wait before retry
-        
-        return None
+                await adapter.close_browser()
+            except:
+                pass
+            return None
     
     async def cleanup_supplier(self, supplier_id: str):
         """Close browser for supplier"""
