@@ -524,60 +524,74 @@ class ScrapingBeeAdapter(ScraperBase):
             medida_normalized = self.normalize_medida(medida)
             logger.info(f"ScrapingBee search: {medida} → {medida_normalized} | {marca}")
             
-            # Construct Euromais search URL
-            search_url = f"https://eurotyrepl.log/consulta-de-pneus/?tab=pneus&subtab=pneus&medida={medida_normalized}"
+            # Try different URL patterns for Euromais/Eurotyre
+            search_urls = [
+                f"https://www.eurotyre.pt/pt/pesquisa?q={medida_normalized}",
+                f"https://www.eurotyre.pt/pneus?medida={medida_normalized}",
+                f"https://www.eurotyre.pt/?s={medida_normalized}",
+            ]
             
-            # ScrapingBee API request
-            params = {
-                'api_key': self.api_key,
-                'url': search_url,
-                'render_js': 'true',  # Execute JavaScript
-                'premium_proxy': 'false',  # Use free proxies
-                'country_code': 'pt',  # Portugal proxy
-            }
-            
-            logger.info(f"Requesting: {search_url}")
-            response = requests.get(self.api_url, params=params, timeout=30)
-            
-            if response.status_code == 200:
-                content = response.text
-                logger.info(f"Got response: {len(content)} bytes")
+            for search_url in search_urls:
+                logger.info(f"Trying URL: {search_url}")
                 
-                # Check for no results
-                if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto"]):
-                    logger.info("No results found")
-                    return None
+                # ScrapingBee API request
+                params = {
+                    'api_key': self.api_key,
+                    'url': search_url,
+                    'render_js': 'true',
+                    'block_resources': 'false',
+                    'premium_proxy': 'false',
+                    'country_code': 'pt',
+                }
                 
-                # Extract prices
-                price_patterns = [
-                    r'€\s*(\d+[,\.]\d{2})',
-                    r'(\d+[,\.]\d{2})\s*€',
-                    r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',
-                ]
-                
-                found_prices = []
-                for pattern in price_patterns:
-                    matches = re.findall(pattern, content, re.IGNORECASE)
-                    for match in matches:
-                        try:
-                            price_str = match.replace(',', '.')
-                            price = float(price_str)
-                            if 15 < price < 500:
-                                found_prices.append(price)
-                        except ValueError:
+                try:
+                    response = requests.get(self.api_url, params=params, timeout=30)
+                    
+                    if response.status_code == 200:
+                        content = response.text
+                        logger.info(f"Got {len(content)} bytes from {search_url}")
+                        
+                        # Check for results
+                        if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto"]):
+                            logger.info("No results on this URL, trying next...")
                             continue
-                
-                if found_prices:
-                    found_prices = list(set(found_prices))
-                    best_price = min(found_prices)
-                    logger.info(f"Found {len(found_prices)} prices, best: €{best_price}")
-                    return best_price
-                
-                logger.warning("No prices extracted")
-                return None
-            else:
-                logger.error(f"ScrapingBee error: {response.status_code} - {response.text[:200]}")
-                return None
+                        
+                        # Extract prices
+                        price_patterns = [
+                            r'€\s*(\d+[,\.]\d{2})',
+                            r'(\d+[,\.]\d{2})\s*€',
+                            r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',
+                            r'preco["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
+                        ]
+                        
+                        found_prices = []
+                        for pattern in price_patterns:
+                            matches = re.findall(pattern, content, re.IGNORECASE)
+                            for match in matches:
+                                try:
+                                    price_str = match.replace(',', '.')
+                                    price = float(price_str)
+                                    if 15 < price < 500:
+                                        found_prices.append(price)
+                                except ValueError:
+                                    continue
+                        
+                        if found_prices:
+                            found_prices = list(set(found_prices))
+                            best_price = min(found_prices)
+                            logger.info(f"✅ Found {len(found_prices)} prices, best: €{best_price}")
+                            return best_price
+                        else:
+                            logger.info("No prices extracted, trying next URL...")
+                    else:
+                        logger.warning(f"Status {response.status_code}, trying next URL...")
+                        
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Request failed: {str(e)}")
+                    continue
+            
+            logger.warning("No prices found on any URL")
+            return None
                 
         except Exception as e:
             logger.error(f"ScrapingBee search error: {str(e)}")
