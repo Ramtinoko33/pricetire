@@ -30,13 +30,36 @@ class ScraperBase(ABC):
         self.browser: Optional[Browser] = None
         
     async def init_browser(self):
-        """Initialize browser and page"""
+        """Initialize browser and page with anti-detection"""
         playwright = await async_playwright().start()
+        # Launch with anti-detection args
         self.browser = await playwright.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+            ]
         )
-        self.page = await self.browser.new_page()
+        # Create context with fake user agent and viewport
+        context = await self.browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            viewport={'width': 1920, 'height': 1080},
+            locale='pt-PT',
+            timezone_id='Europe/Lisbon',
+        )
+        self.page = await context.new_page()
+        
+        # Remove webdriver flag
+        await self.page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+        
         self.page.set_default_timeout(30000)  # 30s timeout
         
     async def close_browser(self):
