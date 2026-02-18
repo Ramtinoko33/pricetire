@@ -719,16 +719,30 @@ class PrismanilAdapter(ScraperBase):
             
             # Ensure we're on the search page
             current_url = self.page.url
+            logger.info(f"Prismanil: Current URL: {current_url}")
+            
             if 'pesquisa' not in current_url:
-                await self.page.goto("https://www.prismanil.pt/b2b/pesquisa", wait_until="networkidle", timeout=30000)
-                await asyncio.sleep(3)
+                logger.info("Prismanil: Navigating to pesquisa page...")
+                await self.page.goto("https://www.prismanil.pt/b2b/pesquisa", wait_until="load", timeout=30000)
+                await asyncio.sleep(5)
+            
+            # Take screenshot for debugging
+            await self.take_screenshot(f"prismanil_search_page_{medida_normalized}")
+            
+            # Check page content
+            content = await self.page.content()
+            logger.info(f"Prismanil: Page has 'txtPesquisa': {'txtPesquisa' in content}")
+            logger.info(f"Prismanil: Page has 'btnPesquisar': {'btnPesquisar' in content}")
             
             # Wait for search field
             try:
-                await self.page.wait_for_selector('#txtPesquisa', timeout=10000)
+                await self.page.wait_for_selector('#txtPesquisa', timeout=15000)
+                logger.info("Prismanil: txtPesquisa found")
             except:
-                logger.warning("Prismanil: txtPesquisa not found, waiting more...")
-                await asyncio.sleep(3)
+                logger.warning("Prismanil: txtPesquisa not found after wait")
+                # Maybe we need to login again
+                await self.take_screenshot("prismanil_no_search_field")
+                return None
             
             # Fill search field
             search_input = self.page.locator('#txtPesquisa')
@@ -737,7 +751,7 @@ class PrismanilAdapter(ScraperBase):
                 await search_input.fill(medida_normalized)
                 logger.info(f"Prismanil: Filled search with {medida_normalized}")
             else:
-                logger.warning("Prismanil: #txtPesquisa not found")
+                logger.warning("Prismanil: #txtPesquisa locator returned 0")
                 return None
             
             await asyncio.sleep(1)
@@ -752,8 +766,10 @@ class PrismanilAdapter(ScraperBase):
                 logger.info("Prismanil: Pressed Enter")
             
             # Wait for results
-            await asyncio.sleep(5)
+            await asyncio.sleep(6)
             await self.page.wait_for_load_state("networkidle")
+            
+            await self.take_screenshot(f"prismanil_results_{medida_normalized}")
             
             # Extract prices
             content = await self.page.content()
@@ -783,6 +799,11 @@ class PrismanilAdapter(ScraperBase):
                 return best_price
             
             logger.info(f"Prismanil: No prices found for {medida_normalized}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Prismanil search error: {str(e)}")
+            return None
             return None
             
         except Exception as e:
