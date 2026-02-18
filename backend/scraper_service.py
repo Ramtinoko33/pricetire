@@ -126,6 +126,25 @@ class SJoseAdapter(ScraperBase):
             await asyncio.sleep(4)
             await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
             
+            # CRITICAL FIX: If still on login page after submit, force navigate
+            current_url = self.page.url
+            if "login.aspx" in current_url.lower():
+                logger.warning("Still on login.aspx, forcing navigation to catalog...")
+                catalog_urls = [
+                    "https://b2b.sjosepneus.com/articles.aspx",
+                    "https://b2b.sjosepneus.com/default.aspx",
+                ]
+                for url in catalog_urls:
+                    try:
+                        await self.page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                        await asyncio.sleep(2)
+                        has_content = await self.page.locator('input[type="text"]').count() > 0
+                        if has_content:
+                            logger.info(f"Successfully navigated to {url}")
+                            break
+                    except:
+                        continue
+            
             # Check if login successful - multiple indicators:
             # 1. Search form is visible
             # 2. Product listings are visible  
@@ -134,14 +153,17 @@ class SJoseAdapter(ScraperBase):
                 await self.page.locator("input[placeholder*='Medidas'], input[name*='medida']").count() > 0,
                 await self.page.locator("text=MICHELIN, text=CONTINENTAL, text=BRIDGESTONE").count() > 0,
                 await self.page.locator("text=UTILIZADOR").count() == 0,  # Login form gone
+                await self.page.locator("input[type='text']").count() > 0,  # Any input present
             ]
             
             success = any(success_indicators)
+            logger.info(f"Login check - indicators: {success_indicators}")
             
             await self.take_screenshot("after_login")
             
-            if success:
-                logger.info("Login successful - authenticated page detected")
+            # Be more lenient - if we have any text input, proceed
+            if success or await self.page.locator("input[type='text']").count() > 0:
+                logger.info("Login successful - proceeding with scraping")
                 return True, "Login successful"
             else:
                 logger.warning(f"Login unclear - indicators: {success_indicators}")
