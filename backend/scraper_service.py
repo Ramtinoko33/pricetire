@@ -696,7 +696,9 @@ class ScraperService:
         supplier_url_lower = supplier.get('url_login', '').lower()
         
         if 'jose' in supplier_name_lower or 'sjose' in supplier_name_lower:
-            adapter = SJoseAdapter(
+            # Use ScrapingBee for S. José (session-based login)
+            logger.info(f"Using ScrapingBee adapter for {supplier['name']}")
+            adapter = ScrapingBeeAdapter(
                 supplier_id=supplier_id,
                 supplier_name=supplier['name'],
                 url_login=supplier['url_login'],
