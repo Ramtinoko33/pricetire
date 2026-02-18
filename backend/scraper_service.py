@@ -583,33 +583,39 @@ class ScrapingBeeAdapter(ScraperBase):
             return False, f"Login error: {str(e)}"
     
     async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
-        """Search using ScrapingBee API"""
+        """Search using ScrapingBee API with authenticated session"""
         try:
             import requests
             import re
             
             medida_normalized = self.normalize_medida(medida)
-            logger.info(f"ScrapingBee search: {medida} → {medida_normalized} | {marca}")
+            logger.info(f"ScrapingBee search: {medida} → {medida_normalized} | Session: {self.session_id}")
             
-            # Try different URL patterns for Euromais/Eurotyre
-            search_urls = [
-                f"https://www.eurotyre.pt/pt/pesquisa?q={medida_normalized}",
-                f"https://www.eurotyre.pt/pneus?medida={medida_normalized}",
-                f"https://www.eurotyre.pt/?s={medida_normalized}",
-            ]
+            # Use authenticated session to search
+            # Build search URL based on supplier
+            if 'eurotyre' in self.url_search.lower() or 'euromais' in self.supplier_name.lower():
+                search_urls = [
+                    f"https://www.eurotyre.pt/pt/pesquisa?q={medida_normalized}",
+                    f"https://www.eurotyre.pt/pneus/{medida_normalized}",
+                ]
+            elif 'sjose' in self.supplier_name.lower() or 'jose' in self.supplier_name.lower():
+                search_urls = [
+                    f"https://b2b.sjosepneus.com/articles.aspx?search={medida_normalized}",
+                    f"https://b2b.sjosepneus.com/default.aspx?medida={medida_normalized}",
+                ]
+            else:
+                search_urls = [f"{self.url_search}?search={medida_normalized}"]
             
             for search_url in search_urls:
-                logger.info(f"Trying URL: {search_url}")
+                logger.info(f"Searching: {search_url}")
                 
-                # ScrapingBee API request with stealth proxy
                 params = {
                     'api_key': self.api_key,
                     'url': search_url,
                     'render_js': 'true',
-                    'stealth_proxy': 'true',  # Anti-detection
-                    'block_resources': 'false',
+                    'stealth_proxy': 'true',
+                    'session_id': self.session_id,  # Use logged-in session
                     'country_code': 'pt',
-                    'premium_proxy': 'false',
                 }
                 
                 try:
@@ -617,11 +623,16 @@ class ScrapingBeeAdapter(ScraperBase):
                     
                     if response.status_code == 200:
                         content = response.text
-                        logger.info(f"Got {len(content)} bytes from {search_url}")
+                        logger.info(f"Got {len(content)} bytes")
                         
-                        # Check for results
-                        if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto"]):
-                            logger.info("No results on this URL, trying next...")
+                        # Check for "still on login page" indicators
+                        if any(text in content.lower() for text in ["login", "utilizador", "password", "entrar"]):
+                            logger.warning("Still on login page - session may have expired")
+                            continue
+                        
+                        # Check for no results
+                        if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto", "nenhum registo"]):
+                            logger.info("No results")
                             continue
                         
                         # Extract prices
@@ -630,6 +641,7 @@ class ScrapingBeeAdapter(ScraperBase):
                             r'(\d+[,\.]\d{2})\s*€',
                             r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',
                             r'preco["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
+                            r'valor["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
                         ]
                         
                         found_prices = []
@@ -650,19 +662,19 @@ class ScrapingBeeAdapter(ScraperBase):
                             logger.info(f"✅ Found {len(found_prices)} prices, best: €{best_price}")
                             return best_price
                         else:
-                            logger.info("No prices extracted, trying next URL...")
+                            logger.info("No prices extracted from this URL")
                     else:
-                        logger.warning(f"Status {response.status_code}, trying next URL...")
+                        logger.warning(f"Status {response.status_code}")
                         
                 except requests.exceptions.RequestException as e:
-                    logger.error(f"Request failed: {str(e)}")
+                    logger.error(f"Request error: {str(e)}")
                     continue
             
             logger.warning("No prices found on any URL")
             return None
                 
         except Exception as e:
-            logger.error(f"ScrapingBee search error: {str(e)}")
+            logger.error(f"Search error: {str(e)}")
             return None
 
 class ScraperService:
