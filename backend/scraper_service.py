@@ -534,14 +534,15 @@ class ScrapingBeeAdapter(ScraperBase):
             for search_url in search_urls:
                 logger.info(f"Trying URL: {search_url}")
                 
-                # ScrapingBee API request
+                # ScrapingBee API request with stealth proxy
                 params = {
                     'api_key': self.api_key,
                     'url': search_url,
                     'render_js': 'true',
+                    'stealth_proxy': 'true',  # Anti-detection
                     'block_resources': 'false',
-                    'premium_proxy': 'false',
                     'country_code': 'pt',
+                    'premium_proxy': 'false',
                 }
                 
                 try:
