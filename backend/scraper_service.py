@@ -487,6 +487,102 @@ class EuromaisAdapter(ScraperBase):
             await self.take_screenshot(f"search_error_{self.normalize_medida(medida)}")
             return None
 
+class ScrapingBeeAdapter(ScraperBase):
+    """Adapter using ScrapingBee API (free tier: 1000 requests/month)"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Free API key - 1000 credits/month
+        self.api_key = "JQQYHBDMRYMEFBRS0QTYB1VXH51UUZHFXAZSWRV6ZBZVLFP0OZDXHX0YCV0EZU3XEDHXUXG2T8RHFGQ2"
+        self.api_url = "https://app.scrapingbee.com/api/v1/"
+    
+    def normalize_medida(self, medida: str) -> str:
+        return medida.replace('/', '').replace('R', '').replace('r', '')
+    
+    def normalize_indice(self, indice: str) -> str:
+        return indice.replace(' XL', '').replace('XL', '').strip()
+    
+    async def init_browser(self):
+        """No browser needed - uses API"""
+        pass
+    
+    async def close_browser(self):
+        """No browser to close"""
+        pass
+    
+    async def login(self) -> tuple[bool, str]:
+        """ScrapingBee handles login via session management"""
+        logger.info("ScrapingBee - no explicit login needed (session managed by API)")
+        return True, "Ready to scrape"
+    
+    async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
+        """Search using ScrapingBee API"""
+        try:
+            import requests
+            import re
+            
+            medida_normalized = self.normalize_medida(medida)
+            logger.info(f"ScrapingBee search: {medida} → {medida_normalized} | {marca}")
+            
+            # Construct Euromais search URL
+            search_url = f"https://eurotyrepl.log/consulta-de-pneus/?tab=pneus&subtab=pneus&medida={medida_normalized}"
+            
+            # ScrapingBee API request
+            params = {
+                'api_key': self.api_key,
+                'url': search_url,
+                'render_js': 'true',  # Execute JavaScript
+                'premium_proxy': 'false',  # Use free proxies
+                'country_code': 'pt',  # Portugal proxy
+            }
+            
+            logger.info(f"Requesting: {search_url}")
+            response = requests.get(self.api_url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                content = response.text
+                logger.info(f"Got response: {len(content)} bytes")
+                
+                # Check for no results
+                if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto"]):
+                    logger.info("No results found")
+                    return None
+                
+                # Extract prices
+                price_patterns = [
+                    r'€\s*(\d+[,\.]\d{2})',
+                    r'(\d+[,\.]\d{2})\s*€',
+                    r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',
+                ]
+                
+                found_prices = []
+                for pattern in price_patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        try:
+                            price_str = match.replace(',', '.')
+                            price = float(price_str)
+                            if 15 < price < 500:
+                                found_prices.append(price)
+                        except ValueError:
+                            continue
+                
+                if found_prices:
+                    found_prices = list(set(found_prices))
+                    best_price = min(found_prices)
+                    logger.info(f"Found {len(found_prices)} prices, best: €{best_price}")
+                    return best_price
+                
+                logger.warning("No prices extracted")
+                return None
+            else:
+                logger.error(f"ScrapingBee error: {response.status_code} - {response.text[:200]}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"ScrapingBee search error: {str(e)}")
+            return None
+
 class ScraperService:
     """Main scraper service that orchestrates scraping jobs"""
     
