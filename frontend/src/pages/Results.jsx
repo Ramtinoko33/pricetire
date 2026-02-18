@@ -64,6 +64,27 @@ const Results = () => {
     }
   };
 
+  const handleDelete = async (jobId, filename) => {
+    if (!window.confirm(`Tem certeza que deseja eliminar o job "${filename}"?`)) return;
+
+    try {
+      await jobsAPI.delete(jobId);
+      toast.success('Job eliminado com sucesso!');
+      
+      // If deleted job was selected, clear selection
+      if (selectedJob === jobId) {
+        setSelectedJob(null);
+        setResults([]);
+      }
+      
+      // Reload jobs list
+      loadJobs();
+    } catch (error) {
+      console.error('Error deleting job:', error);
+      toast.error('Erro ao eliminar job');
+    }
+  };
+
   const getStatusBadge = (status) => {
     const variants = {
       completed: 'default',
