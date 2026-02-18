@@ -501,7 +501,13 @@ class MP24Adapter(ScraperBase):
         try:
             logger.info(f"MP24: Navigating to {self.url_login}")
             await self.page.goto(self.url_login, wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
+            
+            # Check if already logged in
+            content = await self.page.content()
+            if 'sair' in content.lower() or 'logout' in content.lower():
+                logger.info("MP24: Already logged in")
+                return True, "Already logged in"
             
             # Fill username using name attribute
             username_input = self.page.locator('input[name="_username"]')
@@ -519,7 +525,7 @@ class MP24Adapter(ScraperBase):
                 await self.page.locator('input[type="password"]').first.fill(self.password)
             logger.info("Filled password")
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             
             # Submit login
             login_btn = self.page.locator('a:has-text("Início de sessão")')
@@ -528,7 +534,7 @@ class MP24Adapter(ScraperBase):
             else:
                 await self.page.evaluate("document.getElementById('login_form')?.submit()")
             
-            await asyncio.sleep(3)
+            await asyncio.sleep(4)
             await self.page.wait_for_load_state("networkidle")
             
             # Check if logged in
@@ -550,24 +556,38 @@ class MP24Adapter(ScraperBase):
             logger.info(f"MP24 search: {medida} → {medida_normalized}")
             
             # Navigate to tyres page
-            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(2)
+            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=45000)
+            await asyncio.sleep(3)
+            
+            # Wait for matchcode field to be available
+            try:
+                await self.page.wait_for_selector('#matchcodeField', timeout=10000)
+            except:
+                logger.warning("MP24: matchcodeField not found, waiting more...")
+                await asyncio.sleep(3)
             
             # Use matchcode search field
             matchcode_input = self.page.locator('#matchcodeField')
             if await matchcode_input.count() > 0:
+                await matchcode_input.clear()
                 await matchcode_input.fill(medida_normalized)
+                logger.info(f"MP24: Filled matchcode with {medida_normalized}")
                 await asyncio.sleep(1)
                 
-                # Submit search
-                submit_btn = self.page.locator('button[type="submit"]').first
+                # Submit search - find the form's submit button
+                submit_btn = self.page.locator('#matchcode button[type="submit"]')
                 if await submit_btn.count() > 0:
                     await submit_btn.click()
+                    logger.info("MP24: Clicked submit button")
                 else:
                     await matchcode_input.press("Enter")
+                    logger.info("MP24: Pressed Enter")
                 
-                await asyncio.sleep(4)
+                await asyncio.sleep(5)
                 await self.page.wait_for_load_state("networkidle")
+            else:
+                logger.warning("MP24: matchcodeField not found")
+                return None
             
             # Get content and extract prices
             content = await self.page.content()
@@ -575,8 +595,8 @@ class MP24Adapter(ScraperBase):
             price_patterns = [
                 r'€\s*(\d+[,\.]\d{2})',
                 r'(\d+[,\.]\d{2})\s*€',
-                r'"purchasePrice"\s*:\s*(\d+\.?\d*)',
-                r'"price"\s*:\s*(\d+\.?\d*)',
+                r'"purchasePrice"\s*:\s*"?(\d+\.?\d*)"?',
+                r'"price"\s*:\s*"?(\d+\.?\d*)"?',
             ]
             
             found_prices = []
