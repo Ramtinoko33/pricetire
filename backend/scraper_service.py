@@ -253,44 +253,6 @@ class SJoseAdapter(ScraperBase):
             logger.error(f"Search error for {medida}: {str(e)}")
             await self.take_screenshot(f"search_error_{self.normalize_medida(medida)}")
             return None
-            if "sem resultado" in content.lower() or "nenhum registo" in content.lower():
-                logger.info("No results found")
-                return None
-            
-            # Extract prices - look for price patterns
-            price_patterns = [
-                r'(\d+[,.]\d{2})\s*€',  # 123.45€ or 123,45€
-                r'€\s*(\d+[,.]\d{2})',  # €123.45
-                r'Preço.*?(\d+[,.]\d{2})',  # Preço: 123.45
-            ]
-            
-            prices = []
-            for pattern in price_patterns:
-                matches = re.findall(pattern, content)
-                for match in matches:
-                    try:
-                        # Normalize price (replace comma with dot)
-                        price_str = match.replace(',', '.')
-                        price = float(price_str)
-                        if 10 < price < 1000:  # Reasonable tire price range
-                            prices.append(price)
-                    except ValueError:
-                        continue
-            
-            if prices:
-                # Return the first/lowest price found
-                best_price = min(prices)
-                logger.info(f"Found price: €{best_price}")
-                return best_price
-            
-            logger.info("No valid price found in results")
-            await self.take_screenshot(f"no_price_{medida.replace('/', '_')}")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Search error for {medida}: {str(e)}")
-            await self.take_screenshot(f"search_error_{medida.replace('/', '_')}")
-            return None
 
 class ScraperService:
     """Main scraper service that orchestrates scraping jobs"""
