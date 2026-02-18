@@ -487,14 +487,8 @@ class EuromaisAdapter(ScraperBase):
             await self.take_screenshot(f"search_error_{self.normalize_medida(medida)}")
             return None
 
-class ScrapingBeeAdapter(ScraperBase):
-    """Adapter using ScrapingBee API with session management for login"""
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.api_key = "O39DKUCEBZMYH87283H6GI2JE84RI5WRRZ9190ARLV7MX5AROAKDTU8DD9RURWDERRV82VO4O1OAN9UW"
-        self.api_url = "https://app.scrapingbee.com/api/v1/"
-        self.session_id = None  # Will store session after login
+class MP24Adapter(ScraperBase):
+    """Adapter for MP24 (Euromaster Marketplace) using Playwright"""
     
     def normalize_medida(self, medida: str) -> str:
         return medida.replace('/', '').replace('R', '').replace('r', '')
@@ -502,190 +496,233 @@ class ScrapingBeeAdapter(ScraperBase):
     def normalize_indice(self, indice: str) -> str:
         return indice.replace(' XL', '').replace('XL', '').strip()
     
-    async def init_browser(self):
-        """No browser needed - uses API"""
-        pass
-    
-    async def close_browser(self):
-        """Clean up session"""
-        self.session_id = None
-    
     async def login(self) -> tuple[bool, str]:
-        """Login using ScrapingBee session and JavaScript execution"""
+        """Login to MP24"""
         try:
-            import requests
+            logger.info(f"MP24: Navigating to {self.url_login}")
+            await self.page.goto(self.url_login, wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(2)
             
-            logger.info(f"ScrapingBee: Attempting login to {self.url_login}")
-            
-            # Generate unique session ID for this supplier
-            import hashlib
-            session_string = f"{self.supplier_id}_{self.username}"
-            self.session_id = hashlib.md5(session_string.encode()).hexdigest()
-            
-            # JavaScript to fill and submit login form
-            js_script = f"""
-            // Wait for page to load
-            await new Promise(r => setTimeout(r, 2000));
-            
-            // Find and fill username
-            const usernameInputs = document.querySelectorAll('input[type="text"], input[type="email"]');
-            if (usernameInputs.length > 0) {{
-                usernameInputs[0].value = '{self.username}';
-                usernameInputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }}
-            
-            // Find and fill password
-            const passwordInputs = document.querySelectorAll('input[type="password"]');
-            if (passwordInputs.length > 0) {{
-                passwordInputs[0].value = '{self.password}';
-                passwordInputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }}
-            
-            // Wait a bit
-            await new Promise(r => setTimeout(r, 1000));
-            
-            // Find and click login button
-            const buttons = document.querySelectorAll('button[type="submit"], input[type="submit"], button:contains("LOGIN"), button:contains("ENTRAR")');
-            if (buttons.length > 0) {{
-                buttons[0].click();
-            }} else {{
-                // Fallback: submit form
-                const forms = document.querySelectorAll('form');
-                if (forms.length > 0) forms[0].submit();
-            }}
-            
-            // Wait for navigation
-            await new Promise(r => setTimeout(r, 3000));
-            """
-            
-            params = {
-                'api_key': self.api_key,
-                'url': self.url_login,
-                'render_js': 'true',
-                'stealth_proxy': 'true',
-                'session_id': self.session_id,
-                'js_scenario': '{"instructions": [{"wait": 2000}, {"fill": [{"selector": "input[type=\\\"text\\\"]", "text": "' + self.username + '"}]}, {"fill": [{"selector": "input[type=\\\"password\\\"]", "text": "' + self.password + '"}]}, {"wait": 500}, {"click": "button[type=submit], input[type=submit]"}, {"wait": 3000}]}',
-                'country_code': 'pt',
-            }
-            
-            logger.info(f"Making login request with session: {self.session_id}")
-            response = requests.post(self.api_url, data=params, timeout=45)
-            
-            if response.status_code == 200:
-                logger.info(f"Login successful - session {self.session_id} established")
-                return True, f"Session established: {self.session_id}"
+            # Fill username using name attribute
+            username_input = self.page.locator('input[name="_username"]')
+            if await username_input.count() > 0:
+                await username_input.fill(self.username)
+                logger.info(f"Filled username: {self.username}")
             else:
-                logger.error(f"Login failed: {response.status_code}")
-                return False, f"Login failed: {response.status_code}"
-                
+                await self.page.locator('input[type="text"]').first.fill(self.username)
+            
+            # Fill password
+            password_input = self.page.locator('input[name="_password"]')
+            if await password_input.count() > 0:
+                await password_input.fill(self.password)
+            else:
+                await self.page.locator('input[type="password"]').first.fill(self.password)
+            logger.info("Filled password")
+            
+            await asyncio.sleep(0.5)
+            
+            # Submit login
+            login_btn = self.page.locator('a:has-text("Início de sessão")')
+            if await login_btn.count() > 0:
+                await login_btn.click()
+            else:
+                await self.page.evaluate("document.getElementById('login_form')?.submit()")
+            
+            await asyncio.sleep(3)
+            await self.page.wait_for_load_state("networkidle")
+            
+            # Check if logged in
+            content = await self.page.content()
+            if 'sair' in content.lower() or 'logout' in content.lower():
+                logger.info("MP24 login successful")
+                return True, "Login successful"
+            
+            return True, "Login completed"
+            
         except Exception as e:
-            logger.error(f"Login error: {str(e)}")
+            logger.error(f"MP24 login error: {str(e)}")
             return False, f"Login error: {str(e)}"
     
     async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
-        """Search using ScrapingBee API with authenticated session"""
+        """Search for tire on MP24 using matchcode"""
         try:
-            import requests
-            import re
-            
             medida_normalized = self.normalize_medida(medida)
-            logger.info(f"ScrapingBee search: {medida} → {medida_normalized} | Session: {self.session_id}")
+            logger.info(f"MP24 search: {medida} → {medida_normalized}")
             
-            # Build search URLs based on supplier
-            supplier_lower = self.supplier_name.lower()
+            # Navigate to tyres page
+            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(2)
             
-            if 'mp24' in supplier_lower:
-                search_urls = [
-                    f"https://pt.mp24.online/pt_PT/search?q={medida_normalized}",
-                    f"https://pt.mp24.online/pt_PT/tires?size={medida_normalized}",
-                ]
-            elif 'prismanil' in supplier_lower:
-                search_urls = [
-                    f"https://www.prismanil.pt/b2b/pesquisa?medida={medida_normalized}",
-                    f"https://www.prismanil.pt/b2b/pneus?search={medida_normalized}",
-                ]
-            elif 'eurotyre' in supplier_lower or 'euromais' in supplier_lower:
-                search_urls = [
-                    f"https://www.eurotyre.pt/pt/pesquisa?q={medida_normalized}",
-                    f"https://www.eurotyre.pt/pneus/{medida_normalized}",
-                ]
-            elif 'sjose' in supplier_lower or 'jose' in supplier_lower:
-                search_urls = [
-                    f"https://b2b.sjosepneus.com/articles.aspx?search={medida_normalized}",
-                    f"https://b2b.sjosepneus.com/default.aspx?medida={medida_normalized}",
-                ]
-            else:
-                search_urls = [f"{self.url_search}?search={medida_normalized}"]
-            
-            for search_url in search_urls:
-                logger.info(f"Searching: {search_url}")
+            # Use matchcode search field
+            matchcode_input = self.page.locator('#matchcodeField')
+            if await matchcode_input.count() > 0:
+                await matchcode_input.fill(medida_normalized)
+                await asyncio.sleep(1)
                 
-                params = {
-                    'api_key': self.api_key,
-                    'url': search_url,
-                    'render_js': 'true',
-                    'stealth_proxy': 'true',
-                    'session_id': self.session_id,  # Use logged-in session
-                    'country_code': 'pt',
-                }
+                # Submit search
+                submit_btn = self.page.locator('button[type="submit"]').first
+                if await submit_btn.count() > 0:
+                    await submit_btn.click()
+                else:
+                    await matchcode_input.press("Enter")
                 
-                try:
-                    response = requests.get(self.api_url, params=params, timeout=30)
-                    
-                    if response.status_code == 200:
-                        content = response.text
-                        logger.info(f"Got {len(content)} bytes")
-                        
-                        # Check for "still on login page" indicators
-                        if any(text in content.lower() for text in ["login", "utilizador", "password", "entrar"]):
-                            logger.warning("Still on login page - session may have expired")
-                            continue
-                        
-                        # Check for no results
-                        if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto", "nenhum registo"]):
-                            logger.info("No results")
-                            continue
-                        
-                        # Extract prices
-                        price_patterns = [
-                            r'€\s*(\d+[,\.]\d{2})',
-                            r'(\d+[,\.]\d{2})\s*€',
-                            r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',
-                            r'preco["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
-                            r'valor["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
-                        ]
-                        
-                        found_prices = []
-                        for pattern in price_patterns:
-                            matches = re.findall(pattern, content, re.IGNORECASE)
-                            for match in matches:
-                                try:
-                                    price_str = match.replace(',', '.')
-                                    price = float(price_str)
-                                    if 15 < price < 500:
-                                        found_prices.append(price)
-                                except ValueError:
-                                    continue
-                        
-                        if found_prices:
-                            found_prices = list(set(found_prices))
-                            best_price = min(found_prices)
-                            logger.info(f"✅ Found {len(found_prices)} prices, best: €{best_price}")
-                            return best_price
-                        else:
-                            logger.info("No prices extracted from this URL")
-                    else:
-                        logger.warning(f"Status {response.status_code}")
-                        
-                except requests.exceptions.RequestException as e:
-                    logger.error(f"Request error: {str(e)}")
-                    continue
+                await asyncio.sleep(4)
+                await self.page.wait_for_load_state("networkidle")
             
-            logger.warning("No prices found on any URL")
+            # Get content and extract prices
+            content = await self.page.content()
+            
+            price_patterns = [
+                r'€\s*(\d+[,\.]\d{2})',
+                r'(\d+[,\.]\d{2})\s*€',
+                r'"purchasePrice"\s*:\s*(\d+\.?\d*)',
+                r'"price"\s*:\s*(\d+\.?\d*)',
+            ]
+            
+            found_prices = []
+            for pattern in price_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        price_str = match.replace(',', '.')
+                        price = float(price_str)
+                        if 15 < price < 500:
+                            found_prices.append(price)
+                    except ValueError:
+                        continue
+            
+            if found_prices:
+                best_price = min(found_prices)
+                logger.info(f"MP24: Found {len(found_prices)} prices, best: €{best_price}")
+                return best_price
+            
+            logger.info(f"MP24: No prices found for {medida_normalized}")
             return None
-                
+            
         except Exception as e:
-            logger.error(f"Search error: {str(e)}")
+            logger.error(f"MP24 search error: {str(e)}")
+            return None
+
+
+class PrismanilAdapter(ScraperBase):
+    """Adapter for Prismanil B2B using Playwright"""
+    
+    def normalize_medida(self, medida: str) -> str:
+        return medida.replace('/', '').replace('R', '').replace('r', '')
+    
+    def normalize_indice(self, indice: str) -> str:
+        return indice.replace(' XL', '').replace('XL', '').strip()
+    
+    async def login(self) -> tuple[bool, str]:
+        """Login to Prismanil"""
+        try:
+            logger.info(f"Prismanil: Navigating to {self.url_login}")
+            await self.page.goto(self.url_login, wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(2)
+            
+            # Check if already logged in
+            content = await self.page.content()
+            if "txtPesquisa" in content or "Pneus V.comercio" in content:
+                logger.info("Prismanil: Already logged in")
+                return True, "Already logged in"
+            
+            # Fill username
+            username_input = self.page.locator('input[type="text"]').first
+            if await username_input.count() > 0:
+                await username_input.fill(self.username)
+                logger.info(f"Filled username: {self.username}")
+            
+            # Fill password
+            password_input = self.page.locator('input[type="password"]').first
+            if await password_input.count() > 0:
+                await password_input.fill(self.password)
+                logger.info("Filled password")
+            
+            await asyncio.sleep(0.5)
+            
+            # Submit
+            submit_btn = self.page.locator('button:has-text("Entrar")').first
+            if await submit_btn.count() > 0:
+                await submit_btn.click()
+            else:
+                await password_input.press("Enter")
+            
+            await asyncio.sleep(4)
+            await self.page.wait_for_load_state("networkidle")
+            
+            # Check login success
+            content = await self.page.content()
+            if "txtPesquisa" in content or "Pneus" in content:
+                logger.info("Prismanil login successful")
+                return True, "Login successful"
+            
+            return True, "Login completed"
+            
+        except Exception as e:
+            logger.error(f"Prismanil login error: {str(e)}")
+            return False, f"Login error: {str(e)}"
+    
+    async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
+        """Search for tire on Prismanil"""
+        try:
+            medida_normalized = self.normalize_medida(medida)
+            logger.info(f"Prismanil search: {medida} → {medida_normalized}")
+            
+            # Fill search field
+            search_input = self.page.locator('#txtPesquisa')
+            if await search_input.count() > 0:
+                await search_input.fill(medida_normalized)
+                logger.info(f"Filled search: {medida_normalized}")
+            else:
+                search_input = self.page.locator('input[placeholder*="Pesquisa"]').first
+                if await search_input.count() > 0:
+                    await search_input.fill(medida_normalized)
+            
+            await asyncio.sleep(1)
+            
+            # Click search button
+            search_btn = self.page.locator('#btnPesquisar, a:has-text("Pesquisar")')
+            if await search_btn.count() > 0:
+                await search_btn.first.click()
+            else:
+                await search_input.press("Enter")
+            
+            # Wait for results
+            await asyncio.sleep(4)
+            await self.page.wait_for_load_state("networkidle")
+            
+            # Extract prices
+            content = await self.page.content()
+            
+            price_patterns = [
+                r'€\s*(\d+[,\.]\d{2})',
+                r'(\d+[,\.]\d{2})\s*€',
+                r'"preco"\s*:\s*"?(\d+[,\.]\d{2})"?',
+                r'"price"\s*:\s*"?(\d+[,\.]\d{2})"?',
+            ]
+            
+            found_prices = []
+            for pattern in price_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        price_str = match.replace(',', '.')
+                        price = float(price_str)
+                        if 15 < price < 500:
+                            found_prices.append(price)
+                    except ValueError:
+                        continue
+            
+            if found_prices:
+                best_price = min(found_prices)
+                logger.info(f"Prismanil: Found {len(found_prices)} prices, best: €{best_price}")
+                return best_price
+            
+            logger.info(f"Prismanil: No prices found for {medida_normalized}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Prismanil search error: {str(e)}")
             return None
 
 class ScraperService:
