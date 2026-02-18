@@ -561,62 +561,45 @@ class MP24Adapter(ScraperBase):
             medida_normalized = self.normalize_medida(medida)
             logger.info(f"MP24 search: {medida} → {medida_normalized}")
             
-            # First check if we're logged in on current page
-            content = await self.page.content()
-            if 'login_form' in content.lower():
-                logger.info("MP24: Still on login page, re-logging...")
-                await self.login()
-            
-            # Navigate to tyres page with full URL
-            logger.info("MP24: Navigating to tyres page...")
-            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="load", timeout=45000)
-            await asyncio.sleep(5)
-            
-            # Log current URL for debugging
+            # Ensure we're on tyres page
             current_url = self.page.url
-            logger.info(f"MP24: Current URL: {current_url}")
+            if 'tyres' not in current_url:
+                logger.info("MP24: Navigating to tyres page...")
+                await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="load", timeout=30000)
+                await asyncio.sleep(3)
             
-            # Take screenshot for debugging
-            await self.take_screenshot(f"mp24_tyres_page_{medida_normalized}")
+            # Check for login redirect
+            if 'login' in self.page.url.lower():
+                logger.warning("MP24: Session expired - on login page")
+                return None
             
-            # Wait for matchcode field to be available
+            # Wait for matchcode field
             try:
-                await self.page.wait_for_selector('#matchcodeField', timeout=15000)
-                logger.info("MP24: matchcodeField found")
+                await self.page.wait_for_selector('#matchcodeField', timeout=10000)
             except:
-                logger.warning("MP24: matchcodeField not found after wait")
-                # Log page content snippet for debugging
-                content = await self.page.content()
-                logger.info(f"MP24: Page has 'matchcodeField': {'matchcodeField' in content}")
-                logger.info(f"MP24: Page has 'login': {'login' in content.lower()}")
+                logger.warning("MP24: matchcodeField not found")
                 return None
             
-            # Use matchcode search field
-            matchcode_input = self.page.locator('#matchcodeField')
-            if await matchcode_input.count() > 0:
-                await matchcode_input.clear()
-                await matchcode_input.fill(medida_normalized)
-                logger.info(f"MP24: Filled matchcode with {medida_normalized}")
-                await asyncio.sleep(1)
-                
-                # Submit search - find the form's submit button
-                submit_btn = self.page.locator('#matchcode button[type="submit"]')
-                if await submit_btn.count() > 0:
-                    await submit_btn.click()
-                    logger.info("MP24: Clicked submit button")
-                else:
-                    await matchcode_input.press("Enter")
-                    logger.info("MP24: Pressed Enter")
-                
-                await asyncio.sleep(6)
-                await self.page.wait_for_load_state("networkidle")
-                
-                await self.take_screenshot(f"mp24_results_{medida_normalized}")
+            # Fill matchcode and search
+            await self.page.locator('#matchcodeField').fill(medida_normalized)
+            logger.info(f"MP24: Filled matchcode: {medida_normalized}")
+            
+            await asyncio.sleep(1)
+            
+            # Click submit button
+            submit_btn = self.page.locator('button[type="submit"]').first
+            if await submit_btn.count() > 0:
+                await submit_btn.click()
+                logger.info("MP24: Clicked search button")
             else:
-                logger.warning("MP24: matchcodeField locator returned 0")
-                return None
+                await self.page.locator('#matchcodeField').press("Enter")
+                logger.info("MP24: Pressed Enter")
             
-            # Get content and extract prices
+            # Wait for results
+            await asyncio.sleep(5)
+            await self.page.wait_for_load_state("networkidle")
+            
+            # Extract prices
             content = await self.page.content()
             
             price_patterns = [
