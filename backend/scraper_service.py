@@ -573,11 +573,11 @@ class MP24Adapter(ScraperBase):
             medida_normalized = self.normalize_medida(medida)
             logger.info(f"MP24 search: {medida} → {medida_normalized}")
             
-            # Ensure we're on tyres page
+            # Ensure we're on tyres page (use tyres2v0)
             current_url = self.page.url
             if 'tyres' not in current_url:
-                logger.info("MP24: Navigating to tyres page...")
-                await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=45000)
+                logger.info("MP24: Navigating to tyres2v0 page...")
+                await self.page.goto("https://pt.mp24.online/pt_PT/tyres2v0", wait_until="networkidle", timeout=45000)
                 await asyncio.sleep(5)
             
             # Check for login redirect
@@ -588,18 +588,11 @@ class MP24Adapter(ScraperBase):
             # Wait for page to fully load
             await asyncio.sleep(3)
             
-            # Check page content for debugging
+            # Check page content
             content = await self.page.content()
             has_matchcode = 'matchcodeField' in content
             has_filterTop = 'filterTop' in content
             logger.info(f"MP24: Page contains matchcodeField: {has_matchcode}, filterTop: {has_filterTop}")
-            
-            # Save HTML for debug if matchcode not found
-            if not has_matchcode:
-                debug_path = f"/app/tmp/mp24_debug_{medida_normalized}.html"
-                with open(debug_path, 'w') as f:
-                    f.write(content)
-                logger.info(f"MP24: Saved debug HTML to {debug_path}")
             
             # Wait for matchcode field with longer timeout
             try:
