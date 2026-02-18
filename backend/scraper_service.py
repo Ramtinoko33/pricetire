@@ -457,18 +457,6 @@ class ScraperService:
                 password=supplier['password'],
                 selectors=supplier.get('selectors')
             )
-        else:
-            # Default to generic adapter (using SJoseAdapter as base for now)
-            logger.warning(f"No specific adapter for {supplier['name']}, using generic adapter")
-            adapter = SJoseAdapter(
-                supplier_id=supplier_id,
-                supplier_name=supplier['name'],
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
         
         self.adapters[supplier_id] = adapter
         return adapter
