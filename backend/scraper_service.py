@@ -492,8 +492,8 @@ class ScrapingBeeAdapter(ScraperBase):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Free API key - 1000 credits/month
-        self.api_key = "JQQYHBDMRYMEFBRS0QTYB1VXH51UUZHFXAZSWRV6ZBZVLFP0OZDXHX0YCV0EZU3XEDHXUXG2T8RHFGQ2"
+        # ScrapingBee API key
+        self.api_key = "O39DKUCEBZMYH87283H6GI2JE84RI5WRRZ9190ARLV7MX5AROAKDTU8DD9RURWDERRV82VO4O1OAN9UW"
         self.api_url = "https://app.scrapingbee.com/api/v1/"
     
     def normalize_medida(self, medida: str) -> str:
