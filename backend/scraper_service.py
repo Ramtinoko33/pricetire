@@ -919,62 +919,20 @@ class ScraperService:
         adapter = self.create_adapter(supplier)
         self.adapters[supplier_id] = adapter
         return adapter
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
-        elif 'sjose' in supplier_name_lower or 'sjose' in supplier_url_lower:
-            logger.info(f"Using SJoseAdapter for {supplier['name']}")
-            adapter = SJoseAdapter(
-                supplier_id=supplier_id,
-                supplier_name=supplier['name'],
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
-        elif 'euromais' in supplier_name_lower or 'eurotyre' in supplier_url_lower:
-            logger.info(f"Using EuromaisAdapter for {supplier['name']}")
-            adapter = EuromaisAdapter(
-                supplier_id=supplier_id,
-                supplier_name=supplier['name'],
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
-        else:
-            # Default: Use SJoseAdapter as generic fallback
-            logger.info(f"Using generic SJoseAdapter for {supplier['name']}")
-            adapter = SJoseAdapter(
-                supplier_id=supplier_id,
-                supplier_name=supplier['name'],
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
-        
-        self.adapters[supplier_id] = adapter
-        return adapter
     
     async def test_supplier_login(self, supplier: Dict[str, Any]) -> tuple[bool, str, Optional[str]]:
         """Test login for a supplier"""
-        adapter = self.get_adapter(supplier)
+        adapter = self.create_adapter(supplier)
         return await adapter.test_login()
     
     async def scrape_product(self, supplier: Dict[str, Any], medida: str, marca: str, 
                             modelo: str, indice: str) -> Optional[float]:
         """Scrape single product from supplier - creates fresh browser for each call"""
-        adapter = self.get_adapter(supplier)
+        # Always create fresh adapter for complete isolation
+        adapter = self.create_adapter(supplier)
         
         try:
-            # Always create fresh browser for isolation
+            # Initialize fresh browser
             await adapter.init_browser()
             
             # Login
