@@ -85,51 +85,58 @@ class SJoseAdapter(ScraperBase):
         """Login to S. José"""
         try:
             logger.info(f"Navigating to {self.url_login}")
-            await self.page.goto(self.url_login, wait_until="networkidle")
+            await self.page.goto(self.url_login, wait_until="domcontentloaded", timeout=60000)
             
-            # Wait for page to load
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             
-            # Check if already logged in (look for logout or user info)
-            logged_in = await self.page.locator("text=Bem vinda").count() > 0
-            if logged_in:
+            # Check if already logged in - look for specific elements that only appear after login
+            # After login, usually there's a search form or products visible
+            already_logged_in = await self.page.locator("input[placeholder*='Medidas'], input[name*='medida']").count() > 0
+            if already_logged_in:
                 logger.info("Already logged in to S. José")
                 return True, "Already logged in"
             
-            # Find login form - try multiple strategies
-            # Strategy 1: Look for username input by type="text" or id/name containing "user"
-            username_input = self.page.locator('input[type="text"]').first
-            if await username_input.count() > 0:
-                await username_input.fill(self.username)
-                logger.info("Filled username")
+            # Fill username - first text input
+            username_inputs = self.page.locator('input[type="text"]')
+            if await username_inputs.count() > 0:
+                await username_inputs.first.fill(self.username)
+                logger.info(f"Filled username: {self.username}")
+                await asyncio.sleep(0.5)
             
-            # Strategy 2: Look for password input
-            password_input = self.page.locator('input[type="password"]').first
-            if await password_input.count() > 0:
-                await password_input.fill(self.password)
+            # Fill password
+            password_inputs = self.page.locator('input[type="password"]')
+            if await password_inputs.count() > 0:
+                await password_inputs.first.fill(self.password)
                 logger.info("Filled password")
+                await asyncio.sleep(0.5)
             
-            # Take screenshot before submit
             await self.take_screenshot("before_login")
             
-            # Click login button - try multiple strategies
-            login_button = self.page.locator('input[type="submit"], button[type="submit"]').first
+            # Click ENTRAR button - look for text or submit button
+            login_button = self.page.locator('text=ENTRAR, input[type="submit"], button[type="submit"], button:has-text("ENTRAR")').first
             if await login_button.count() > 0:
                 await login_button.click()
-                logger.info("Clicked login button")
+                logger.info("Clicked ENTRAR button")
+            else:
+                # If button not found, try submitting the form directly
+                await self.page.keyboard.press("Enter")
+                logger.info("Submitted form via Enter key")
             
-            # Wait for navigation
-            await asyncio.sleep(3)
+            # Wait for navigation after login
+            await asyncio.sleep(4)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
             
-            # Check if login successful
-            success = await self.page.locator("text=Bem vinda").count() > 0 or "PESQUISA" in await self.page.content()
+            # Check if login successful - look for search form elements
+            success = await self.page.locator("input[placeholder*='Medidas'], input[name*='medida']").count() > 0
+            
+            await self.take_screenshot("after_login")
             
             if success:
-                logger.info("Login successful")
+                logger.info("Login successful - search form detected")
                 return True, "Login successful"
             else:
-                await self.take_screenshot("login_failed")
-                return False, "Login failed - no success indicator found"
+                logger.warning("Login may have failed - search form not detected")
+                return False, "Login failed - no search form found"
                 
         except Exception as e:
             logger.error(f"Login error: {str(e)}")
