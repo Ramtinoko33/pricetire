@@ -565,19 +565,40 @@ class MP24Adapter(ScraperBase):
             current_url = self.page.url
             if 'tyres' not in current_url:
                 logger.info("MP24: Navigating to tyres page...")
-                await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="load", timeout=30000)
-                await asyncio.sleep(3)
+                await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=45000)
+                await asyncio.sleep(5)
             
             # Check for login redirect
             if 'login' in self.page.url.lower():
                 logger.warning("MP24: Session expired - on login page")
                 return None
             
-            # Wait for matchcode field
+            # Wait for page to fully load
+            await asyncio.sleep(3)
+            
+            # Check page content for debugging
+            content = await self.page.content()
+            has_matchcode = 'matchcodeField' in content
+            has_filterTop = 'filterTop' in content
+            logger.info(f"MP24: Page contains matchcodeField: {has_matchcode}, filterTop: {has_filterTop}")
+            
+            # Save HTML for debug if matchcode not found
+            if not has_matchcode:
+                debug_path = f"/app/tmp/mp24_debug_{medida_normalized}.html"
+                with open(debug_path, 'w') as f:
+                    f.write(content)
+                logger.info(f"MP24: Saved debug HTML to {debug_path}")
+            
+            # Wait for matchcode field with longer timeout
             try:
-                await self.page.wait_for_selector('#matchcodeField', timeout=10000)
+                await self.page.wait_for_selector('#matchcodeField', timeout=15000)
+                logger.info("MP24: matchcodeField found!")
             except:
-                logger.warning("MP24: matchcodeField not found")
+                logger.warning("MP24: matchcodeField not found after wait")
+                # Try alternative - use dropdown filters instead
+                if has_filterTop:
+                    logger.info("MP24: Trying filter dropdowns instead...")
+                    return await self._search_with_filters(medida_normalized)
                 return None
             
             # Fill matchcode and search
@@ -600,38 +621,66 @@ class MP24Adapter(ScraperBase):
             await self.page.wait_for_load_state("networkidle")
             
             # Extract prices
-            content = await self.page.content()
-            
-            price_patterns = [
-                r'€\s*(\d+[,\.]\d{2})',
-                r'(\d+[,\.]\d{2})\s*€',
-                r'"purchasePrice"\s*:\s*"?(\d+\.?\d*)"?',
-                r'"price"\s*:\s*"?(\d+\.?\d*)"?',
-            ]
-            
-            found_prices = []
-            for pattern in price_patterns:
-                matches = re.findall(pattern, content, re.IGNORECASE)
-                for match in matches:
-                    try:
-                        price_str = match.replace(',', '.')
-                        price = float(price_str)
-                        if 15 < price < 500:
-                            found_prices.append(price)
-                    except ValueError:
-                        continue
-            
-            if found_prices:
-                best_price = min(found_prices)
-                logger.info(f"MP24: Found {len(found_prices)} prices, best: €{best_price}")
-                return best_price
-            
-            logger.info(f"MP24: No prices found for {medida_normalized}")
-            return None
+            return await self._extract_prices_from_page()
             
         except Exception as e:
             logger.error(f"MP24 search error: {str(e)}")
             return None
+    
+    async def _search_with_filters(self, medida_normalized: str) -> Optional[float]:
+        """Alternative search using dropdown filters"""
+        try:
+            # Parse medida: 2055516 -> width=205, profile=55, rim=16
+            if len(medida_normalized) >= 6:
+                width = medida_normalized[:3]  # 205
+                profile = medida_normalized[3:5]  # 55
+                rim = medida_normalized[5:]  # 16
+                
+                logger.info(f"MP24: Using filters - width={width}, profile={profile}, rim={rim}")
+                
+                # Select filters
+                await self.page.select_option('#filterTop12', width)
+                await asyncio.sleep(1)
+                await self.page.select_option('#filterTop13', profile)
+                await asyncio.sleep(1)
+                await self.page.select_option('#filterTop14', rim)
+                await asyncio.sleep(3)
+                
+                return await self._extract_prices_from_page()
+        except Exception as e:
+            logger.error(f"MP24 filter search error: {str(e)}")
+        return None
+    
+    async def _extract_prices_from_page(self) -> Optional[float]:
+        """Extract prices from current page"""
+        content = await self.page.content()
+        
+        price_patterns = [
+            r'€\s*(\d+[,\.]\d{2})',
+            r'(\d+[,\.]\d{2})\s*€',
+            r'"purchasePrice"\s*:\s*"?(\d+\.?\d*)"?',
+            r'"price"\s*:\s*"?(\d+\.?\d*)"?',
+        ]
+        
+        found_prices = []
+        for pattern in price_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            for match in matches:
+                try:
+                    price_str = match.replace(',', '.')
+                    price = float(price_str)
+                    if 15 < price < 500:
+                        found_prices.append(price)
+                except ValueError:
+                    continue
+        
+        if found_prices:
+            best_price = min(found_prices)
+            logger.info(f"MP24: Found {len(found_prices)} prices, best: €{best_price}")
+            return best_price
+        
+        logger.info("MP24: No prices found")
+        return None
 
 
 class PrismanilAdapter(ScraperBase):
