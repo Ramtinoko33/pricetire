@@ -134,34 +134,47 @@ const Results = () => {
         <CardContent>
           <div className="space-y-2">
             {jobs.map((job) => (
-              <button
+              <div
                 key={job.id}
-                onClick={() => loadJobResults(job.id)}
-                className={`w-full text-left p-4 border rounded-sm transition-colors ${
+                className={`flex items-center gap-3 p-4 border rounded-sm transition-colors ${
                   selectedJob === job.id
                     ? 'border-slate-900 bg-slate-50'
                     : 'border-slate-200 hover:border-slate-400'
                 }`}
-                data-testid={`job-select-${job.id}`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{job.filename}</p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {new Date(job.created_at).toLocaleString('pt-PT')} • {job.total_items} itens
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-sm font-mono font-bold text-green-700">
-                        €{job.total_savings?.toFixed(2) || '0.00'}
+                <button
+                  onClick={() => loadJobResults(job.id)}
+                  className="flex-1 text-left"
+                  data-testid={`job-select-${job.id}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{job.filename}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {new Date(job.created_at).toLocaleString('pt-PT')} • {job.total_items} itens
                       </p>
-                      <p className="text-xs text-slate-500">economia</p>
                     </div>
-                    {getStatusBadge(job.status)}
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-sm font-mono font-bold text-green-700">
+                          €{job.total_savings?.toFixed(2) || '0.00'}
+                        </p>
+                        <p className="text-xs text-slate-500">economia</p>
+                      </div>
+                      {getStatusBadge(job.status)}
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDelete(job.id, job.filename)}
+                  data-testid={`delete-job-btn-${job.id}`}
+                  className="flex-shrink-0"
+                >
+                  <Trash2 size={16} className="text-red-600" />
+                </Button>
+              </div>
             ))}
           </div>
         </CardContent>
