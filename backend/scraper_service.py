@@ -457,13 +457,9 @@ class ScraperService:
                 password=supplier['password'],
                 selectors=supplier.get('selectors')
             )
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
         else:
-            # Default to SJoseAdapter structure - can be customized per supplier
+            # Default to generic adapter (using SJoseAdapter as base for now)
+            logger.warning(f"No specific adapter for {supplier['name']}, using generic adapter")
             adapter = SJoseAdapter(
                 supplier_id=supplier_id,
                 supplier_name=supplier['name'],
