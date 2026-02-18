@@ -844,22 +844,16 @@ class ScraperService:
     def __init__(self):
         self.adapters: Dict[str, ScraperBase] = {}
     
-    def get_adapter(self, supplier: Dict[str, Any]) -> ScraperBase:
-        """Get or create adapter for supplier"""
+    def create_adapter(self, supplier: Dict[str, Any]) -> ScraperBase:
+        """Create a new adapter for supplier (always creates fresh instance)"""
         supplier_id = supplier['id']
-        
-        # Return existing adapter if available
-        if supplier_id in self.adapters:
-            return self.adapters[supplier_id]
-        
-        # Create new adapter based on supplier name/URL
         supplier_name_lower = supplier['name'].lower()
         supplier_url_lower = supplier.get('url_login', '').lower()
         
         # Select appropriate adapter based on supplier
         if 'mp24' in supplier_name_lower or 'mp24' in supplier_url_lower:
-            logger.info(f"Using MP24Adapter for {supplier['name']}")
-            adapter = MP24Adapter(
+            logger.info(f"Creating MP24Adapter for {supplier['name']}")
+            return MP24Adapter(
                 supplier_id=supplier_id,
                 supplier_name=supplier['name'],
                 url_login=supplier['url_login'],
@@ -869,10 +863,62 @@ class ScraperService:
                 selectors=supplier.get('selectors')
             )
         elif 'prismanil' in supplier_name_lower or 'prismanil' in supplier_url_lower:
-            logger.info(f"Using PrismanilAdapter for {supplier['name']}")
-            adapter = PrismanilAdapter(
+            logger.info(f"Creating PrismanilAdapter for {supplier['name']}")
+            return PrismanilAdapter(
                 supplier_id=supplier_id,
                 supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        elif 'sjose' in supplier_name_lower or 'sjose' in supplier_url_lower:
+            logger.info(f"Creating SJoseAdapter for {supplier['name']}")
+            return SJoseAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        elif 'euromais' in supplier_name_lower or 'eurotyre' in supplier_url_lower:
+            logger.info(f"Creating EuromaisAdapter for {supplier['name']}")
+            return EuromaisAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        else:
+            # Default: Use SJoseAdapter as generic fallback
+            logger.info(f"Creating generic SJoseAdapter for {supplier['name']}")
+            return SJoseAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+    
+    def get_adapter(self, supplier: Dict[str, Any]) -> ScraperBase:
+        """Get or create adapter for supplier (for backward compatibility)"""
+        supplier_id = supplier['id']
+        
+        # Return existing adapter if available
+        if supplier_id in self.adapters:
+            return self.adapters[supplier_id]
+        
+        adapter = self.create_adapter(supplier)
+        self.adapters[supplier_id] = adapter
+        return adapter
                 url_login=supplier['url_login'],
                 url_search=supplier['url_search'],
                 username=supplier['username'],
