@@ -488,13 +488,13 @@ class EuromaisAdapter(ScraperBase):
             return None
 
 class ScrapingBeeAdapter(ScraperBase):
-    """Adapter using ScrapingBee API (free tier: 1000 requests/month)"""
+    """Adapter using ScrapingBee API with session management for login"""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # ScrapingBee API key
         self.api_key = "O39DKUCEBZMYH87283H6GI2JE84RI5WRRZ9190ARLV7MX5AROAKDTU8DD9RURWDERRV82VO4O1OAN9UW"
         self.api_url = "https://app.scrapingbee.com/api/v1/"
+        self.session_id = None  # Will store session after login
     
     def normalize_medida(self, medida: str) -> str:
         return medida.replace('/', '').replace('R', '').replace('r', '')
@@ -507,13 +507,80 @@ class ScrapingBeeAdapter(ScraperBase):
         pass
     
     async def close_browser(self):
-        """No browser to close"""
-        pass
+        """Clean up session"""
+        self.session_id = None
     
     async def login(self) -> tuple[bool, str]:
-        """ScrapingBee handles login via session management"""
-        logger.info("ScrapingBee - no explicit login needed (session managed by API)")
-        return True, "Ready to scrape"
+        """Login using ScrapingBee session and JavaScript execution"""
+        try:
+            import requests
+            
+            logger.info(f"ScrapingBee: Attempting login to {self.url_login}")
+            
+            # Generate unique session ID for this supplier
+            import hashlib
+            session_string = f"{self.supplier_id}_{self.username}"
+            self.session_id = hashlib.md5(session_string.encode()).hexdigest()
+            
+            # JavaScript to fill and submit login form
+            js_script = f"""
+            // Wait for page to load
+            await new Promise(r => setTimeout(r, 2000));
+            
+            // Find and fill username
+            const usernameInputs = document.querySelectorAll('input[type="text"], input[type="email"]');
+            if (usernameInputs.length > 0) {{
+                usernameInputs[0].value = '{self.username}';
+                usernameInputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}
+            
+            // Find and fill password
+            const passwordInputs = document.querySelectorAll('input[type="password"]');
+            if (passwordInputs.length > 0) {{
+                passwordInputs[0].value = '{self.password}';
+                passwordInputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}
+            
+            // Wait a bit
+            await new Promise(r => setTimeout(r, 1000));
+            
+            // Find and click login button
+            const buttons = document.querySelectorAll('button[type="submit"], input[type="submit"], button:contains("LOGIN"), button:contains("ENTRAR")');
+            if (buttons.length > 0) {{
+                buttons[0].click();
+            }} else {{
+                // Fallback: submit form
+                const forms = document.querySelectorAll('form');
+                if (forms.length > 0) forms[0].submit();
+            }}
+            
+            // Wait for navigation
+            await new Promise(r => setTimeout(r, 3000));
+            """
+            
+            params = {
+                'api_key': self.api_key,
+                'url': self.url_login,
+                'render_js': 'true',
+                'stealth_proxy': 'true',
+                'session_id': self.session_id,
+                'js_scenario': '{"instructions": [{"wait": 2000}, {"fill": [{"selector": "input[type=\\\"text\\\"]", "text": "' + self.username + '"}]}, {"fill": [{"selector": "input[type=\\\"password\\\"]", "text": "' + self.password + '"}]}, {"wait": 500}, {"click": "button[type=submit], input[type=submit]"}, {"wait": 3000}]}',
+                'country_code': 'pt',
+            }
+            
+            logger.info(f"Making login request with session: {self.session_id}")
+            response = requests.post(self.api_url, data=params, timeout=45)
+            
+            if response.status_code == 200:
+                logger.info(f"Login successful - session {self.session_id} established")
+                return True, f"Session established: {self.session_id}"
+            else:
+                logger.error(f"Login failed: {response.status_code}")
+                return False, f"Login failed: {response.status_code}"
+                
+        except Exception as e:
+            logger.error(f"Login error: {str(e)}")
+            return False, f"Login error: {str(e)}"
     
     async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
         """Search using ScrapingBee API"""
