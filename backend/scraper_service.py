@@ -154,50 +154,105 @@ class SJoseAdapter(ScraperBase):
     async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
         """Search for tire on S. José and return price"""
         try:
-            # Normalize formats for B2B search
             medida_normalized = self.normalize_medida(medida)
             indice_normalized = self.normalize_indice(indice)
             
-            logger.info(f"Searching: {medida} ({medida_normalized}) {marca} {modelo} {indice} ({indice_normalized})")
+            logger.info(f"Searching: {medida} → {medida_normalized} | {marca} | {modelo} | {indice} → {indice_normalized}")
             
-            # Navigate to search page if needed
-            if "default.aspx" not in self.page.url:
-                await self.page.goto(self.url_login, wait_until="networkidle")
-                await asyncio.sleep(1)
+            await asyncio.sleep(1)
             
-            # Fill search form with normalized medida
-            medida_input = self.page.locator('input[type="text"]').first
+            # Find and fill search input (Medidas field)
+            medida_input = self.page.locator('input[type="text"], input[placeholder*="Medida"]').first
+            await medida_input.clear()
             await medida_input.fill(medida_normalized)
+            logger.info(f"Filled search with: {medida_normalized}")
+            await asyncio.sleep(0.5)
             
-            # Select marca if dropdown exists
+            # Select marca (brand) if dropdown exists
             marca_select = self.page.locator('select').first
             if await marca_select.count() > 0:
-                # Try to select the brand
                 try:
+                    # Try exact match first
                     await marca_select.select_option(label=marca)
+                    logger.info(f"Selected brand: {marca}")
                 except:
-                    # If exact match fails, try contains
-                    options = await marca_select.locator('option').all_text_contents()
-                    for option in options:
-                        if marca.lower() in option.lower():
-                            await marca_select.select_option(label=option)
-                            break
+                    # Try partial match
+                    try:
+                        options = await marca_select.locator('option').all_text_contents()
+                        for option in options:
+                            if marca.lower() in option.lower():
+                                await marca_select.select_option(label=option)
+                                logger.info(f"Selected brand (partial): {option}")
+                                break
+                    except:
+                        logger.warning(f"Could not select brand: {marca}")
+            
+            await asyncio.sleep(0.5)
             
             # Click search button
-            search_button = self.page.locator('text=PESQUISAR').or_(self.page.locator('input[value*="Pesqui"]'))
-            await search_button.first.click()
+            search_button = self.page.locator('text=PESQUISAR, button:has-text("PESQUISAR"), input[value*="Pesqui"]').first
+            if await search_button.count() > 0:
+                await search_button.click()
+                logger.info("Clicked PESQUISAR")
+            else:
+                # Fallback: press Enter
+                await medida_input.press("Enter")
+                logger.info("Pressed Enter to search")
             
-            # Wait for results
-            await asyncio.sleep(2)
-            await self.page.wait_for_load_state("networkidle")
+            # Wait for results to load
+            await asyncio.sleep(3)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
             
-            # Parse results - look for price in results table/grid
-            # S. José typically shows results in a grid/table format
-            # Look for price patterns: €XX.XX or XX,XX€
+            await self.take_screenshot(f"search_results_{medida_normalized}")
             
+            # Get page content
             content = await self.page.content()
             
-            # Check if "sem resultados" or "no results"
+            # Check for "no results"
+            if any(text in content.lower() for text in ["sem resultado", "nenhum registo", "não foram encontrados"]):
+                logger.info(f"No results found for {medida_normalized}")
+                return None
+            
+            # Extract prices using multiple patterns
+            # Pattern 1: XX,XX€ (comma as decimal separator, common in PT)
+            # Pattern 2: €XX,XX
+            # Pattern 3: Price in text/spans
+            
+            import re
+            
+            price_patterns = [
+                r'(\d+[,\.]\d{2})\s*€',  # 77,85€ or 77.85€
+                r'€\s*(\d+[,\.]\d{2})',  # €77,85
+                r'(\d+[,\.]\d{2})€',     # 77,85€
+            ]
+            
+            found_prices = []
+            for pattern in price_patterns:
+                matches = re.findall(pattern, content)
+                for match in matches:
+                    try:
+                        # Normalize: replace comma with dot
+                        price_str = match.replace(',', '.')
+                        price = float(price_str)
+                        # Reasonable tire price range: 10-1000 euros
+                        if 10 < price < 1000:
+                            found_prices.append(price)
+                    except ValueError:
+                        continue
+            
+            if found_prices:
+                # Return the lowest price found (best deal)
+                best_price = min(found_prices)
+                logger.info(f"Found {len(found_prices)} prices, lowest: €{best_price}")
+                return best_price
+            
+            logger.warning(f"No valid prices found in results for {medida_normalized}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Search error for {medida}: {str(e)}")
+            await self.take_screenshot(f"search_error_{self.normalize_medida(medida)}")
+            return None
             if "sem resultado" in content.lower() or "nenhum registo" in content.lower():
                 logger.info("No results found")
                 return None
