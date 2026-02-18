@@ -136,19 +136,31 @@ class SJoseAdapter(ScraperBase):
             await self.take_screenshot("login_error")
             return False, f"Login error: {str(e)}"
     
+    def normalize_medida(self, medida: str) -> str:
+        """Normalize medida format: remove / and R (ex: 195/55R16 -> 1955516)"""
+        return medida.replace('/', '').replace('R', '').replace('r', '')
+    
+    def normalize_indice(self, indice: str) -> str:
+        """Normalize indice: remove XL (ex: 94W XL -> 94W)"""
+        return indice.replace(' XL', '').replace('XL', '').strip()
+    
     async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
         """Search for tire on S. José and return price"""
         try:
+            # Normalize formats for B2B search
+            medida_normalized = self.normalize_medida(medida)
+            indice_normalized = self.normalize_indice(indice)
+            
+            logger.info(f"Searching: {medida} ({medida_normalized}) {marca} {modelo} {indice} ({indice_normalized})")
+            
             # Navigate to search page if needed
             if "default.aspx" not in self.page.url:
                 await self.page.goto(self.url_login, wait_until="networkidle")
                 await asyncio.sleep(1)
             
-            # Fill search form
-            # Medidas field
+            # Fill search form with normalized medida
             medida_input = self.page.locator('input[type="text"]').first
-            await medida_input.fill(medida)
-            logger.info(f"Searching for: {medida} {marca} {modelo} {indice}")
+            await medida_input.fill(medida_normalized)
             
             # Select marca if dropdown exists
             marca_select = self.page.locator('select').first
