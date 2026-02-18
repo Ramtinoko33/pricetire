@@ -28,12 +28,13 @@ class ScraperBase(ABC):
         self.selectors = selectors or {}
         self.page: Optional[Page] = None
         self.browser: Optional[Browser] = None
+        self.playwright = None  # Store playwright instance for cleanup
         
     async def init_browser(self):
         """Initialize browser and page with anti-detection"""
-        playwright = await async_playwright().start()
+        self.playwright = await async_playwright().start()
         # Launch with anti-detection args
-        self.browser = await playwright.chromium.launch(
+        self.browser = await self.playwright.chromium.launch(
             headless=True,
             args=[
                 '--no-sandbox',
@@ -63,9 +64,14 @@ class ScraperBase(ABC):
         self.page.set_default_timeout(30000)  # 30s timeout
         
     async def close_browser(self):
-        """Close browser"""
+        """Close browser and playwright"""
         if self.browser:
             await self.browser.close()
+            self.browser = None
+        if self.playwright:
+            await self.playwright.stop()
+            self.playwright = None
+        self.page = None
             
     async def take_screenshot(self, name: str) -> str:
         """Take screenshot and return path"""
