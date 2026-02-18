@@ -421,13 +421,42 @@ class ScraperService:
         if supplier_id in self.adapters:
             return self.adapters[supplier_id]
         
-        # Create new adapter based on supplier name/type
-        # For now, we'll use SJoseAdapter for S. José and can add more adapters later
-        if 'jose' in supplier['name'].lower() or 'sjose' in supplier['name'].lower():
+        # Create new adapter based on supplier name/URL
+        supplier_name_lower = supplier['name'].lower()
+        supplier_url_lower = supplier.get('url_login', '').lower()
+        
+        if 'jose' in supplier_name_lower or 'sjose' in supplier_name_lower:
             adapter = SJoseAdapter(
                 supplier_id=supplier_id,
                 supplier_name=supplier['name'],
                 url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        elif 'euromais' in supplier_name_lower or 'eurotyre' in supplier_name_lower or 'eurotyre.pt' in supplier_url_lower:
+            adapter = EuromaisAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
+        else:
+            # Default to generic adapter (using SJoseAdapter as base for now)
+            logger.warning(f"No specific adapter for {supplier['name']}, using generic adapter")
+            adapter = SJoseAdapter(
+                supplier_id=supplier_id,
+                supplier_name=supplier['name'],
+                url_login=supplier['url_login'],
+                url_search=supplier['url_search'],
+                username=supplier['username'],
+                password=supplier['password'],
+                selectors=supplier.get('selectors')
+            )
                 url_search=supplier['url_search'],
                 username=supplier['username'],
                 password=supplier['password'],
