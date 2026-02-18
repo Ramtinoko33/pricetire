@@ -515,41 +515,60 @@ class MP24Adapter(ScraperBase):
                 logger.info("MP24: Already logged in")
                 return True, "Already logged in"
             
-            # Fill credentials - use same selectors as working test script
+            # Fill credentials
             await self.page.locator('input[name="_username"]').fill(self.username)
             logger.info(f"MP24: Filled username: {self.username}")
             
             await self.page.locator('input[name="_password"]').fill(self.password)
             logger.info("MP24: Filled password")
             
-            # Click login link and wait (same as test script)
-            await self.page.locator('a:has-text("Início de sessão")').click()
-            logger.info("MP24: Clicked login link")
+            await asyncio.sleep(1)
             
-            # Wait exactly like the test script
+            # Submit form via JavaScript (same as the site does)
+            await self.page.evaluate("document.getElementById('login_form').submit()")
+            logger.info("MP24: Submitted form via JavaScript")
+            
+            # Wait for navigation
             await asyncio.sleep(4)
+            await self.page.wait_for_load_state("networkidle")
             
-            # Check if login worked by trying to navigate to tyres page
-            logger.info("MP24: Attempting to navigate to tyres page...")
-            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="load", timeout=30000)
-            await asyncio.sleep(3)
-            
-            # Check current URL
+            # Check if logged in by looking at current URL and content
             current_url = self.page.url
-            logger.info(f"MP24: Current URL after navigation: {current_url}")
+            logger.info(f"MP24: Post-login URL: {current_url}")
             
-            if 'login' in current_url.lower():
-                logger.warning("MP24: Still on login page - login failed")
-                return False, "Login failed - redirected to login page"
-            
-            # Check for tyres page elements
             content = await self.page.content()
-            if 'matchcodeField' in content or 'filterTop' in content:
-                logger.info("MP24: Login successful - on tyres page")
+            
+            # Check for successful login indicators
+            if 'sair' in content.lower() or 'logout' in content.lower() or 'tyres' in current_url.lower():
+                logger.info("MP24: Login successful")
                 return True, "Login successful"
             
-            logger.info("MP24: Login appears successful")
-            return True, "Login completed"
+            # If still on login page, try clicking the button as fallback
+            if 'login_form' in content.lower():
+                logger.info("MP24: Form submit didn't work, trying button click...")
+                try:
+                    login_btn = self.page.locator('a.btn-primary:has-text("sessão")')
+                    if await login_btn.count() > 0:
+                        await login_btn.click()
+                        await asyncio.sleep(4)
+                        await self.page.wait_for_load_state("networkidle")
+                except Exception as e:
+                    logger.warning(f"MP24: Button click failed: {e}")
+            
+            # Navigate to tyres page to confirm login
+            logger.info("MP24: Navigating to tyres page to verify login...")
+            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(3)
+            
+            current_url = self.page.url
+            content = await self.page.content()
+            
+            if 'login' in current_url.lower() or 'conecte-se' in content.lower():
+                logger.error("MP24: Login failed - redirected to login page")
+                return False, "Login failed - credentials may be incorrect"
+            
+            logger.info("MP24: Login verified - on tyres page")
+            return True, "Login successful"
             
         except Exception as e:
             logger.error(f"MP24 login error: {str(e)}")
