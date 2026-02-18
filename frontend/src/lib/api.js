@@ -28,6 +28,7 @@ export const jobsAPI = {
   getProgress: (id) => api.get(`/jobs/${id}/progress`),
   getResults: (id) => api.get(`/jobs/${id}/results`),
   export: (id) => api.get(`/jobs/${id}/export`, { responseType: 'blob' }),
+  delete: (id) => api.delete(`/jobs/${id}`),
 };
 
 export const statsAPI = {
