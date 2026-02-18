@@ -362,12 +362,11 @@ class EuromaisAdapter(ScraperBase):
             
             await asyncio.sleep(3)
             
-            # Navigate to catalog/search area - try common URLs
+            # Navigate directly to tire catalog (from screenshot: eurotyrepl.log/consulta-de-pneus)
             catalog_urls = [
+                "https://eurotyrepl.log/consulta-de-pneus/?tab=pneus&subtab=pneus",
+                "https://www.eurotyre.pt/pt/consulta-de-pneus/?tab=pneus&subtab=pneus",
                 "https://www.eurotyre.pt/pt/pneus",
-                "https://www.eurotyre.pt/pt/catalog",
-                "https://www.eurotyre.pt/pt/produtos",
-                "https://www.eurotyre.pt/pt/pesquisa",
             ]
             
             for url in catalog_urls:
