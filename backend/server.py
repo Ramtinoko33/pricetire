@@ -387,6 +387,28 @@ async def get_job_results(job_id: str):
     items = await db.job_items.find({"job_id": job_id}, {"_id": 0}).to_list(None)
     return items
 
+@api_router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete job and all related data"""
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Delete job items
+    await db.job_items.delete_many({"job_id": job_id})
+    
+    # Delete prices
+    await db.prices.delete_many({"job_id": job_id})
+    
+    # Delete logs related to this job
+    await db.logs.delete_many({"job_id": job_id})
+    
+    # Delete job
+    await db.jobs.delete_one({"id": job_id})
+    
+    logger.info(f"Deleted job {job_id} and all related data")
+    return {"message": "Job deleted successfully"}
+
 @api_router.get("/jobs/{job_id}/export")
 async def export_job_results(job_id: str):
     job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
