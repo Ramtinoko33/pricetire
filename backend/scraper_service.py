@@ -532,43 +532,36 @@ class MP24Adapter(ScraperBase):
             await asyncio.sleep(4)
             await self.page.wait_for_load_state("networkidle")
             
-            # Check if logged in by looking at current URL and content
+            # Check if logged in
             current_url = self.page.url
-            logger.info(f"MP24: Post-login URL: {current_url}")
-            
             content = await self.page.content()
+            logger.info(f"MP24: Post-login URL: {current_url}")
+            logger.info(f"MP24: Has login_form: {'login_form' in content.lower()}, Has sair: {'sair' in content.lower()}")
             
-            # Check for successful login indicators
-            if 'sair' in content.lower() or 'logout' in content.lower() or 'tyres' in current_url.lower():
+            if 'sair' in content.lower() or 'logout' in content.lower():
                 logger.info("MP24: Login successful")
                 return True, "Login successful"
             
-            # If still on login page, try clicking the button as fallback
-            if 'login_form' in content.lower():
-                logger.info("MP24: Form submit didn't work, trying button click...")
-                try:
-                    login_btn = self.page.locator('a.btn-primary:has-text("sessão")')
-                    if await login_btn.count() > 0:
-                        await login_btn.click()
-                        await asyncio.sleep(4)
-                        await self.page.wait_for_load_state("networkidle")
-                except Exception as e:
-                    logger.warning(f"MP24: Button click failed: {e}")
-            
-            # Navigate to tyres page to confirm login
-            logger.info("MP24: Navigating to tyres page to verify login...")
-            await self.page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+            # Navigate to tyres page (use tyres2v0 which seems to work better)
+            logger.info("MP24: Navigating to tyres2v0 page to verify login...")
+            await self.page.goto("https://pt.mp24.online/pt_PT/tyres2v0", wait_until="networkidle", timeout=30000)
             await asyncio.sleep(3)
             
             current_url = self.page.url
             content = await self.page.content()
+            logger.info(f"MP24: Tyres page URL: {current_url}")
+            logger.info(f"MP24: Has matchcodeField: {'matchcodeField' in content}")
             
             if 'login' in current_url.lower() or 'conecte-se' in content.lower():
                 logger.error("MP24: Login failed - redirected to login page")
                 return False, "Login failed - credentials may be incorrect"
             
-            logger.info("MP24: Login verified - on tyres page")
-            return True, "Login successful"
+            if 'matchcodeField' in content:
+                logger.info("MP24: Login verified - matchcodeField present")
+                return True, "Login successful"
+            
+            logger.info("MP24: Login appears successful")
+            return True, "Login completed"
             
         except Exception as e:
             logger.error(f"MP24 login error: {str(e)}")
