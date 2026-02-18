@@ -706,30 +706,17 @@ class ScraperService:
         supplier_name_lower = supplier['name'].lower()
         supplier_url_lower = supplier.get('url_login', '').lower()
         
-        if 'jose' in supplier_name_lower or 'sjose' in supplier_name_lower:
-            # Use ScrapingBee for S. José (session-based login)
-            logger.info(f"Using ScrapingBee adapter for {supplier['name']}")
-            adapter = ScrapingBeeAdapter(
-                supplier_id=supplier_id,
-                supplier_name=supplier['name'],
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
-        elif 'euromais' in supplier_name_lower or 'eurotyre' in supplier_name_lower or 'eurotyre.pt' in supplier_url_lower:
-            # Use ScrapingBee for Euromais (free tier)
-            logger.info(f"Using ScrapingBee adapter for {supplier['name']}")
-            adapter = ScrapingBeeAdapter(
-                supplier_id=supplier_id,
-                supplier_name=supplier['name'],
-                url_login=supplier['url_login'],
-                url_search=supplier['url_search'],
-                username=supplier['username'],
-                password=supplier['password'],
-                selectors=supplier.get('selectors')
-            )
+        # Use ScrapingBee for all suppliers (session-based)
+        logger.info(f"Using ScrapingBee adapter for {supplier['name']}")
+        adapter = ScrapingBeeAdapter(
+            supplier_id=supplier_id,
+            supplier_name=supplier['name'],
+            url_login=supplier['url_login'],
+            url_search=supplier['url_search'],
+            username=supplier['username'],
+            password=supplier['password'],
+            selectors=supplier.get('selectors')
+        )
         else:
             # Default to generic adapter (using SJoseAdapter as base for now)
             logger.warning(f"No specific adapter for {supplier['name']}, using generic adapter")
