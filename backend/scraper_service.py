@@ -264,6 +264,149 @@ class SJoseAdapter(ScraperBase):
             await self.take_screenshot(f"search_error_{self.normalize_medida(medida)}")
             return None
 
+class EuromaisAdapter(ScraperBase):
+    """Adapter for Euromais/Eurotyre B2B website"""
+    
+    def normalize_medida(self, medida: str) -> str:
+        """Normalize medida format: remove / and R"""
+        return medida.replace('/', '').replace('R', '').replace('r', '')
+    
+    def normalize_indice(self, indice: str) -> str:
+        """Normalize indice: remove XL"""
+        return indice.replace(' XL', '').replace('XL', '').strip()
+    
+    async def login(self) -> tuple[bool, str]:
+        """Login to Euromais"""
+        try:
+            logger.info(f"Navigating to {self.url_login}")
+            await self.page.goto(self.url_login, wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(3)
+            
+            # Check if already logged in
+            already_logged_in = await self.page.locator("text=Sair, text=Logout, text=Pesquisar").count() > 0
+            if already_logged_in:
+                logger.info("Already logged in to Euromais")
+                return True, "Already logged in"
+            
+            # Fill username/email
+            username_inputs = self.page.locator('input[type="text"], input[type="email"], input[name*="user"], input[name*="email"]')
+            if await username_inputs.count() > 0:
+                await username_inputs.first.fill(self.username)
+                logger.info(f"Filled username: {self.username}")
+                await asyncio.sleep(0.5)
+            
+            # Fill password
+            password_inputs = self.page.locator('input[type="password"]')
+            if await password_inputs.count() > 0:
+                await password_inputs.first.fill(self.password)
+                logger.info("Filled password")
+                await asyncio.sleep(0.5)
+            
+            await self.take_screenshot("before_login")
+            
+            # Click LOGIN button
+            login_button = self.page.locator('text=LOGIN, button:has-text("LOGIN"), input[value*="Login"], button[type="submit"]').first
+            if await login_button.count() > 0:
+                await login_button.click()
+                logger.info("Clicked LOGIN button")
+            else:
+                await self.page.keyboard.press("Enter")
+                logger.info("Pressed Enter to login")
+            
+            await asyncio.sleep(4)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            
+            # Check login success
+            success_indicators = [
+                await self.page.locator("text=Sair, text=Logout").count() > 0,
+                await self.page.locator("input[placeholder*='Pesquis'], input[name*='search']").count() > 0,
+                "login" not in self.page.url.lower(),
+            ]
+            
+            success = any(success_indicators)
+            await self.take_screenshot("after_login")
+            
+            if success:
+                logger.info("Login successful to Euromais")
+                return True, "Login successful"
+            else:
+                logger.warning("Login verification unclear")
+                return True, "Login completed (verification unclear)"
+                
+        except Exception as e:
+            logger.error(f"Login error: {str(e)}")
+            await self.take_screenshot("login_error")
+            return False, f"Login error: {str(e)}"
+    
+    async def search_product(self, medida: str, marca: str, modelo: str, indice: str) -> Optional[float]:
+        """Search for tire on Euromais"""
+        try:
+            medida_normalized = self.normalize_medida(medida)
+            indice_normalized = self.normalize_indice(indice)
+            
+            logger.info(f"Searching Euromais: {medida} → {medida_normalized} | {marca}")
+            
+            await asyncio.sleep(1)
+            
+            # Find search input
+            search_input = self.page.locator('input[type="text"], input[type="search"], input[placeholder*="Pesquis"]').first
+            await search_input.clear()
+            await search_input.fill(medida_normalized)
+            logger.info(f"Filled search: {medida_normalized}")
+            await asyncio.sleep(0.5)
+            
+            # Submit search
+            search_button = self.page.locator('button[type="submit"], button:has-text("Pesquisar"), input[type="submit"]').first
+            if await search_button.count() > 0:
+                await search_button.click()
+            else:
+                await search_input.press("Enter")
+            
+            await asyncio.sleep(3)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            
+            await self.take_screenshot(f"search_results_{medida_normalized}")
+            
+            content = await self.page.content()
+            
+            # Check for no results
+            if any(text in content.lower() for text in ["sem resultado", "não encontrado", "nenhum produto"]):
+                logger.info(f"No results for {medida_normalized}")
+                return None
+            
+            # Extract prices - PT format (XX,XX€)
+            import re
+            price_patterns = [
+                r'(\d+[,\.]\d{2})\s*€',
+                r'€\s*(\d+[,\.]\d{2})',
+                r'price["\']?\s*:\s*["\']?(\d+[,\.]\d{2})',
+            ]
+            
+            found_prices = []
+            for pattern in price_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        price_str = match.replace(',', '.')
+                        price = float(price_str)
+                        if 10 < price < 1000:
+                            found_prices.append(price)
+                    except ValueError:
+                        continue
+            
+            if found_prices:
+                best_price = min(found_prices)
+                logger.info(f"Found {len(found_prices)} prices, lowest: €{best_price}")
+                return best_price
+            
+            logger.warning(f"No valid prices found for {medida_normalized}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Search error: {str(e)}")
+            await self.take_screenshot(f"search_error_{self.normalize_medida(medida)}")
+            return None
+
 class ScraperService:
     """Main scraper service that orchestrates scraping jobs"""
     
