@@ -638,11 +638,11 @@ class PrismanilAdapter(ScraperBase):
         try:
             logger.info(f"Prismanil: Navigating to {self.url_login}")
             await self.page.goto(self.url_login, wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             
-            # Check if already logged in
+            # Check if already logged in (search field visible)
             content = await self.page.content()
-            if "txtPesquisa" in content or "Pneus V.comercio" in content:
+            if "txtPesquisa" in content and "btnPesquisar" in content:
                 logger.info("Prismanil: Already logged in")
                 return True, "Already logged in"
             
@@ -658,23 +658,31 @@ class PrismanilAdapter(ScraperBase):
                 await password_input.fill(self.password)
                 logger.info("Filled password")
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             
             # Submit
             submit_btn = self.page.locator('button:has-text("Entrar")').first
             if await submit_btn.count() > 0:
                 await submit_btn.click()
+                logger.info("Clicked Entrar button")
             else:
                 await password_input.press("Enter")
+                logger.info("Pressed Enter")
             
-            await asyncio.sleep(4)
+            await asyncio.sleep(5)
             await self.page.wait_for_load_state("networkidle")
             
-            # Check login success
-            content = await self.page.content()
-            if "txtPesquisa" in content or "Pneus" in content:
-                logger.info("Prismanil login successful")
+            # Wait for search elements to appear
+            try:
+                await self.page.wait_for_selector('#txtPesquisa', timeout=15000)
+                logger.info("Prismanil login successful - search field visible")
                 return True, "Login successful"
+            except:
+                # Check content anyway
+                content = await self.page.content()
+                if "Pneus" in content or "pesquisa" in content.lower():
+                    logger.info("Prismanil login completed")
+                    return True, "Login completed"
             
             return True, "Login completed"
             
@@ -688,27 +696,42 @@ class PrismanilAdapter(ScraperBase):
             medida_normalized = self.normalize_medida(medida)
             logger.info(f"Prismanil search: {medida} → {medida_normalized}")
             
+            # Ensure we're on the search page
+            current_url = self.page.url
+            if 'pesquisa' not in current_url:
+                await self.page.goto("https://www.prismanil.pt/b2b/pesquisa", wait_until="networkidle", timeout=30000)
+                await asyncio.sleep(3)
+            
+            # Wait for search field
+            try:
+                await self.page.wait_for_selector('#txtPesquisa', timeout=10000)
+            except:
+                logger.warning("Prismanil: txtPesquisa not found, waiting more...")
+                await asyncio.sleep(3)
+            
             # Fill search field
             search_input = self.page.locator('#txtPesquisa')
             if await search_input.count() > 0:
+                await search_input.clear()
                 await search_input.fill(medida_normalized)
-                logger.info(f"Filled search: {medida_normalized}")
+                logger.info(f"Prismanil: Filled search with {medida_normalized}")
             else:
-                search_input = self.page.locator('input[placeholder*="Pesquisa"]').first
-                if await search_input.count() > 0:
-                    await search_input.fill(medida_normalized)
+                logger.warning("Prismanil: #txtPesquisa not found")
+                return None
             
             await asyncio.sleep(1)
             
             # Click search button
-            search_btn = self.page.locator('#btnPesquisar, a:has-text("Pesquisar")')
+            search_btn = self.page.locator('#btnPesquisar')
             if await search_btn.count() > 0:
-                await search_btn.first.click()
+                await search_btn.click()
+                logger.info("Prismanil: Clicked Pesquisar")
             else:
                 await search_input.press("Enter")
+                logger.info("Prismanil: Pressed Enter")
             
             # Wait for results
-            await asyncio.sleep(4)
+            await asyncio.sleep(5)
             await self.page.wait_for_load_state("networkidle")
             
             # Extract prices
@@ -739,6 +762,11 @@ class PrismanilAdapter(ScraperBase):
                 return best_price
             
             logger.info(f"Prismanil: No prices found for {medida_normalized}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Prismanil search error: {str(e)}")
+            return None
             return None
             
         except Exception as e:
