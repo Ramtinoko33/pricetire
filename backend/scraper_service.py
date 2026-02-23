@@ -947,7 +947,6 @@ class ScraperService:
     
     async def scrape_product_isolated(self, supplier: Dict[str, Any], medida: str) -> Optional[float]:
         """Scrape product using isolated subprocess - bypasses anti-bot detection"""
-        import subprocess
         import json
         
         config = {
@@ -960,23 +959,29 @@ class ScraperService:
         try:
             logger.info(f"Running isolated scraper for {supplier['name']} - {medida}")
             
-            # Set up environment with Playwright browser path
-            env = os.environ.copy()
-            env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
-            
-            # Run the isolated scraper as subprocess
-            result = subprocess.run(
-                ['python3', '/app/backend/isolated_scraper.py'],
-                input=json.dumps(config),
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 minute timeout per supplier
-                env=env,
-                cwd='/app/backend'
+            # Use asyncio subprocess for better compatibility with FastAPI
+            process = await asyncio.create_subprocess_exec(
+                'python3', '/app/backend/isolated_scraper.py',
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd='/app/backend',
+                env={**os.environ, 'PLAYWRIGHT_BROWSERS_PATH': '/pw-browsers'}
             )
             
-            if result.returncode == 0 and result.stdout:
-                data = json.loads(result.stdout.strip())
+            # Send config and wait for result with timeout
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(input=json.dumps(config).encode()),
+                    timeout=120  # 2 minute timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                logger.error(f"Isolated scraper timeout for {supplier['name']}")
+                return None
+            
+            if process.returncode == 0 and stdout:
+                data = json.loads(stdout.decode().strip())
                 price = data.get('price')
                 error = data.get('error')
                 
@@ -990,12 +995,9 @@ class ScraperService:
                     logger.info(f"Isolated scraper: No price found for {supplier['name']}")
                     return None
             else:
-                logger.error(f"Isolated scraper failed for {supplier['name']}: stdout={result.stdout}, stderr={result.stderr}")
+                logger.error(f"Isolated scraper failed for {supplier['name']}: stdout={stdout}, stderr={stderr}")
                 return None
                 
-        except subprocess.TimeoutExpired:
-            logger.error(f"Isolated scraper timeout for {supplier['name']}")
-            return None
         except Exception as e:
             logger.error(f"Isolated scraper exception for {supplier['name']}: {str(e)}")
             return None
