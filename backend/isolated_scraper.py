@@ -46,11 +46,18 @@ async def scrape_mp24(username: str, password: str, medida: str) -> dict:
     """Scrape MP24 in isolated context"""
     result = {"supplier": "MP24", "price": None, "error": None}
     
+    # Add debug logging to file
+    import sys
+    debug_log = open('/app/tmp/mp24_subprocess_debug.log', 'a')
+    debug_log.write(f"\n=== MP24 scrape started: {medida} ===\n")
+    
     async with async_playwright() as p:
+        debug_log.write("Playwright started\n")
         browser = await p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
         )
+        debug_log.write("Browser launched\n")
         context = await browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             viewport={'width': 1920, 'height': 1080},
@@ -58,24 +65,47 @@ async def scrape_mp24(username: str, password: str, medida: str) -> dict:
         )
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
+        debug_log.write("Page created\n")
         
         try:
             # Login
+            debug_log.write(f"Navigating to login page...\n")
             await page.goto("https://pt.mp24.online/pt_PT", wait_until="networkidle", timeout=60000)
+            debug_log.write(f"On login page, URL: {page.url}\n")
+            
             await page.locator('input[name="_username"]').fill(username)
             await page.locator('input[name="_password"]').fill(password)
+            debug_log.write("Credentials filled\n")
+            
             await page.locator('a:has-text("Início de sessão")').click()
+            debug_log.write("Login clicked\n")
             await asyncio.sleep(3)
             
             # Navigate to tyres page
+            debug_log.write("Navigating to tyres page...\n")
             await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+            debug_log.write(f"On tyres page, URL: {page.url}\n")
             await asyncio.sleep(2)
             
             medida_normalized = normalize_medida(medida)
             
+            # Check page content
+            content = await page.content()
+            has_matchcode = 'matchcodeField' in content
+            has_login = 'login' in page.url.lower()
+            debug_log.write(f"has_matchcode: {has_matchcode}, has_login: {has_login}\n")
+            
+            # Save page for debug
+            with open('/app/tmp/mp24_subprocess_page.html', 'w') as f:
+                f.write(content)
+            debug_log.write("Page saved\n")
+            
             # Use matchcode search
             matchcode_input = page.locator('#matchcodeField')
-            if await matchcode_input.count() > 0:
+            count = await matchcode_input.count()
+            debug_log.write(f"matchcodeField count: {count}\n")
+            
+            if count > 0:
                 await matchcode_input.fill(medida_normalized)
                 await asyncio.sleep(1)
                 
@@ -85,21 +115,27 @@ async def scrape_mp24(username: str, password: str, medida: str) -> dict:
                 else:
                     await matchcode_input.press("Enter")
                 
+                debug_log.write("Search submitted\n")
                 await asyncio.sleep(5)
                 await page.wait_for_load_state("networkidle")
                 
                 content = await page.content()
                 prices = extract_prices(content)
+                debug_log.write(f"Prices found: {prices}\n")
                 
                 if prices:
                     result["price"] = min(prices)
             else:
                 result["error"] = "matchcodeField not found"
+                debug_log.write(f"ERROR: matchcodeField not found\n")
                 
         except Exception as e:
             result["error"] = str(e)
+            debug_log.write(f"EXCEPTION: {e}\n")
         finally:
             await browser.close()
+            debug_log.write("Browser closed\n")
+            debug_log.close()
     
     return result
 
