@@ -463,6 +463,122 @@ async def get_stats():
         "recent_jobs": recent_jobs
     }
 
+# ==================== Manual Scraper Endpoints ====================
+
+scraper_status = {
+    "running": False,
+    "started_at": None,
+    "progress": "",
+    "results": []
+}
+
+async def run_manual_scraper(medidas: list):
+    """Background task to run the scraper"""
+    import subprocess
+    global scraper_status
+    
+    scraper_status["running"] = True
+    scraper_status["started_at"] = datetime.now(timezone.utc).isoformat()
+    scraper_status["progress"] = "Starting scraper..."
+    scraper_status["results"] = []
+    
+    try:
+        medidas_str = ','.join(medidas)
+        
+        env = os.environ.copy()
+        env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
+        
+        process = subprocess.Popen(
+            ['python3', '/app/backend/run_scraper.py', '--medidas', medidas_str],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            cwd='/app/backend'
+        )
+        
+        output_lines = []
+        for line in iter(process.stdout.readline, ''):
+            if line:
+                output_lines.append(line.strip())
+                scraper_status["progress"] = line.strip()
+                logger.info(f"Scraper: {line.strip()}")
+        
+        process.wait()
+        
+        scraper_status["progress"] = "Completed"
+        scraper_status["results"] = output_lines[-20:]  # Last 20 lines
+        
+    except Exception as e:
+        scraper_status["progress"] = f"Error: {str(e)}"
+        logger.error(f"Scraper error: {e}")
+    finally:
+        scraper_status["running"] = False
+
+@api_router.post("/scraper/run")
+async def start_manual_scraper(background_tasks: BackgroundTasks, medidas: list = None):
+    """Start the manual scraper in background"""
+    global scraper_status
+    
+    if scraper_status["running"]:
+        raise HTTPException(status_code=409, detail="Scraper is already running")
+    
+    if not medidas:
+        # Get medidas from pending jobs
+        pending_jobs = await db.jobs.find({"status": {"$in": ["pending", "running"]}}).to_list(10)
+        medidas = []
+        for job in pending_jobs:
+            items = await db.job_items.find({"job_id": job["id"]}).to_list(100)
+            for item in items:
+                medida = item.get("medida", "").replace("/", "").replace("R", "")
+                if medida and medida not in medidas:
+                    medidas.append(medida)
+        
+        if not medidas:
+            medidas = ["2055516"]  # Default test
+    
+    background_tasks.add_task(run_manual_scraper, medidas)
+    
+    return {"message": "Scraper started", "medidas": medidas}
+
+@api_router.get("/scraper/status")
+async def get_scraper_status():
+    """Get current scraper status"""
+    return scraper_status
+
+@api_router.get("/scraped-prices")
+async def get_scraped_prices(medida: str = None):
+    """Get scraped prices from database"""
+    query = {}
+    if medida:
+        medida_norm = medida.replace("/", "").replace("R", "")
+        query["medida"] = {"$regex": medida_norm, "$options": "i"}
+    
+    prices = await db.scraped_prices.find(query, {"_id": 0}).sort("scraped_at", -1).to_list(100)
+    return prices
+
+@api_router.get("/scraped-prices/best/{medida}")
+async def get_best_price(medida: str):
+    """Get best price for a specific tire size"""
+    medida_norm = medida.replace("/", "").replace("R", "")
+    
+    prices = await db.scraped_prices.find(
+        {"medida": {"$regex": medida_norm, "$options": "i"}, "price": {"$ne": None}},
+        {"_id": 0}
+    ).sort("price", 1).to_list(100)
+    
+    if prices:
+        best = prices[0]
+        return {
+            "medida": medida,
+            "best_price": best["price"],
+            "best_supplier": best["supplier_name"],
+            "scraped_at": best.get("scraped_at"),
+            "all_prices": [{"supplier": p["supplier_name"], "price": p["price"]} for p in prices]
+        }
+    
+    return {"medida": medida, "best_price": None, "message": "No prices found"}
+
 app.include_router(api_router)
 
 app.add_middleware(
