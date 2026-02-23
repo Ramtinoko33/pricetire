@@ -79,21 +79,47 @@ async def scrape_mp24(username: str, password: str, medida: str) -> dict:
             
             await page.locator('a:has-text("Início de sessão")').click()
             debug_log.write("Login clicked\n")
-            await asyncio.sleep(3)
             
-            # Navigate to tyres page
+            # Wait for full page load after login
+            await asyncio.sleep(5)
+            await page.wait_for_load_state("networkidle")
+            
+            # Check where we are after login
+            post_login_url = page.url
+            debug_log.write(f"Post-login URL: {post_login_url}\n")
+            
+            # Navigate to tyres page - let the redirect happen naturally
             debug_log.write("Navigating to tyres page...\n")
             await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
-            debug_log.write(f"On tyres page, URL: {page.url}\n")
-            await asyncio.sleep(2)
+            
+            # Wait and let any JS redirects happen
+            await asyncio.sleep(5)
+            
+            # Check final URL
+            tyres_url = page.url
+            debug_log.write(f"On tyres page, URL: {tyres_url}\n")
             
             medida_normalized = normalize_medida(medida)
             
             # Check page content
             content = await page.content()
             has_matchcode = 'matchcodeField' in content
-            has_login = 'login' in page.url.lower()
+            has_login = 'login' in tyres_url.lower()
             debug_log.write(f"has_matchcode: {has_matchcode}, has_login: {has_login}\n")
+            
+            # If still on login page, try alternative approach
+            if has_login or not has_matchcode:
+                debug_log.write("Trying alternative navigation...\n")
+                # Try clicking on the Turismo menu item
+                turismo_link = page.locator('a:has-text("Turismo")')
+                if await turismo_link.count() > 0:
+                    await turismo_link.first.click()
+                    await asyncio.sleep(5)
+                    await page.wait_for_load_state("networkidle")
+                    tyres_url = page.url
+                    debug_log.write(f"After clicking Turismo, URL: {tyres_url}\n")
+                    content = await page.content()
+                    has_matchcode = 'matchcodeField' in content
             
             # Save page for debug
             with open('/app/tmp/mp24_subprocess_page.html', 'w') as f:
