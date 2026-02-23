@@ -945,52 +945,60 @@ class ScraperService:
         adapter = self.create_adapter(supplier)
         return await adapter.test_login()
     
-    async def scrape_product(self, supplier: Dict[str, Any], medida: str, marca: str, 
-                            modelo: str, indice: str) -> Optional[float]:
-        """Scrape single product from supplier - creates fresh browser for each call"""
-        # Always create fresh adapter for complete isolation
-        adapter = self.create_adapter(supplier)
+    async def scrape_product_isolated(self, supplier: Dict[str, Any], medida: str) -> Optional[float]:
+        """Scrape product using isolated subprocess - bypasses anti-bot detection"""
+        import subprocess
+        import json
+        
+        config = {
+            "supplier": supplier['name'],
+            "username": supplier['username'],
+            "password": supplier['password'],
+            "medida": medida
+        }
         
         try:
-            # Initialize fresh browser
-            await adapter.init_browser()
+            logger.info(f"Running isolated scraper for {supplier['name']} - {medida}")
             
-            # Login
-            success, message = await adapter.login()
-            if not success:
-                logger.error(f"Login failed for {supplier['name']}: {message}")
-                await adapter.close_browser()
+            # Run the isolated scraper as subprocess
+            result = subprocess.run(
+                ['python3', '/app/backend/isolated_scraper.py'],
+                input=json.dumps(config),
+                capture_output=True,
+                text=True,
+                timeout=120  # 2 minute timeout per supplier
+            )
+            
+            if result.returncode == 0 and result.stdout:
+                data = json.loads(result.stdout.strip())
+                price = data.get('price')
+                error = data.get('error')
+                
+                if error:
+                    logger.warning(f"Isolated scraper error for {supplier['name']}: {error}")
+                
+                if price:
+                    logger.info(f"Isolated scraper found price for {supplier['name']}: €{price}")
+                    return float(price)
+                else:
+                    logger.info(f"Isolated scraper: No price found for {supplier['name']}")
+                    return None
+            else:
+                logger.error(f"Isolated scraper failed for {supplier['name']}: {result.stderr}")
                 return None
-            
-            # Search product with retry logic
-            max_retries = 2
-            for attempt in range(max_retries):
-                try:
-                    price = await adapter.search_product(medida, marca, modelo, indice)
-                    if price is not None:
-                        await adapter.close_browser()
-                        return price
-                    # If not found but no error, return None (not found)
-                    if attempt == max_retries - 1:
-                        await adapter.close_browser()
-                        return None
-                except Exception as e:
-                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                    if attempt == max_retries - 1:
-                        await adapter.close_browser()
-                        return None
-                    await asyncio.sleep(1)  # Wait before retry
-            
-            await adapter.close_browser()
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"Isolated scraper timeout for {supplier['name']}")
             return None
-            
         except Exception as e:
-            logger.error(f"Scrape error for {supplier['name']}: {str(e)}")
-            try:
-                await adapter.close_browser()
-            except:
-                pass
+            logger.error(f"Isolated scraper exception for {supplier['name']}: {str(e)}")
             return None
+    
+    async def scrape_product(self, supplier: Dict[str, Any], medida: str, marca: str, 
+                            modelo: str, indice: str) -> Optional[float]:
+        """Scrape single product from supplier - uses isolated subprocess for reliability"""
+        # Use isolated subprocess scraping for better anti-bot bypass
+        return await self.scrape_product_isolated(supplier, medida)
     
     async def cleanup_supplier(self, supplier_id: str):
         """Close browser for supplier"""
