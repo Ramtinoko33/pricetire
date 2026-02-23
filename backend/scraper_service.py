@@ -960,13 +960,19 @@ class ScraperService:
         try:
             logger.info(f"Running isolated scraper for {supplier['name']} - {medida}")
             
+            # Set up environment with Playwright browser path
+            env = os.environ.copy()
+            env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
+            
             # Run the isolated scraper as subprocess
             result = subprocess.run(
                 ['python3', '/app/backend/isolated_scraper.py'],
                 input=json.dumps(config),
                 capture_output=True,
                 text=True,
-                timeout=120  # 2 minute timeout per supplier
+                timeout=120,  # 2 minute timeout per supplier
+                env=env,
+                cwd='/app/backend'
             )
             
             if result.returncode == 0 and result.stdout:
@@ -984,7 +990,7 @@ class ScraperService:
                     logger.info(f"Isolated scraper: No price found for {supplier['name']}")
                     return None
             else:
-                logger.error(f"Isolated scraper failed for {supplier['name']}: {result.stderr}")
+                logger.error(f"Isolated scraper failed for {supplier['name']}: stdout={result.stdout}, stderr={result.stderr}")
                 return None
                 
         except subprocess.TimeoutExpired:
