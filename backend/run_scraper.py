@@ -264,22 +264,25 @@ async def run_scraper(medidas: list, supplier_filter: str = None):
     
     results = []
     
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
-        )
+    # Process each supplier with its own browser instance (like test script)
+    for supplier in suppliers:
+        supplier_name = supplier['name'].lower()
+        print(f"\n--- Scraping {supplier['name']} ---")
         
-        for supplier in suppliers:
-            supplier_name = supplier['name'].lower()
-            print(f"\n--- Scraping {supplier['name']} ---")
-            
-            for medida in medidas:
+        for medida in medidas:
+            # Create completely fresh browser for each supplier (like test script does)
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
+                )
+                
                 context = await browser.new_context(
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     viewport={'width': 1920, 'height': 1080},
                     locale='pt-PT',
                 )
+                
                 page = await context.new_page()
                 await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
                 
@@ -308,9 +311,7 @@ async def run_scraper(medidas: list, supplier_filter: str = None):
                     print(f"  Error: {e}")
                     results.append({"supplier": supplier['name'], "medida": medida, "error": str(e)})
                 finally:
-                    await context.close()
-        
-        await browser.close()
+                    await browser.close()
     
     # Save results to file
     result_file = RESULTS_DIR / f"scrape_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
