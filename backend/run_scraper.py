@@ -64,23 +64,40 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
     result = {"supplier": "MP24", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
     
     try:
+        # Login
         await page.goto("https://pt.mp24.online/pt_PT", wait_until="networkidle", timeout=60000)
-        await page.fill('input[name="_username"]', username)
-        await page.fill('input[name="_password"]', password)
-        await page.click('a:has-text("Início de sessão")')
-        await asyncio.sleep(4)
-        
-        await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+        await page.locator('input[name="_username"]').fill(username)
+        await page.locator('input[name="_password"]').fill(password)
+        await page.locator('a:has-text("Início de sessão")').click()
         await asyncio.sleep(3)
         
+        # Navigate to tyres page
+        await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(2)
+        
         medida_norm = normalize_medida(medida)
+        
+        # Wait for matchcode field
+        try:
+            await page.wait_for_selector('#matchcodeField', timeout=10000)
+        except:
+            result["error"] = "matchcodeField not found"
+            return result
         
         matchcode = page.locator('#matchcodeField')
         if await matchcode.count() > 0:
             await matchcode.fill(medida_norm)
             await asyncio.sleep(1)
-            await page.click('button[type="submit"]')
+            
+            # Click submit
+            submit_btn = page.locator('button[type="submit"]').first
+            if await submit_btn.count() > 0:
+                await submit_btn.click()
+            else:
+                await matchcode.press('Enter')
+            
             await asyncio.sleep(5)
+            await page.wait_for_load_state("networkidle")
             
             content = await page.content()
             prices = extract_prices(content)
