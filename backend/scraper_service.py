@@ -946,10 +946,16 @@ class ScraperService:
         return await adapter.test_login()
     
     async def scrape_product_isolated(self, supplier: Dict[str, Any], medida: str) -> Optional[float]:
-        """Scrape product using isolated subprocess - bypasses anti-bot detection"""
+        """Scrape product using background process with file-based communication"""
         import subprocess
         import json
-        from concurrent.futures import ThreadPoolExecutor
+        import uuid
+        import time
+        
+        # Create unique file names for this scrape job
+        job_id = str(uuid.uuid4())[:8]
+        config_file = f"/app/tmp/scrape_config_{job_id}.json"
+        result_file = f"/app/tmp/scrape_result_{job_id}.json"
         
         config = {
             "supplier": supplier['name'],
@@ -958,54 +964,86 @@ class ScraperService:
             "medida": medida
         }
         
-        def run_scraper():
-            """Run scraper in thread"""
-            try:
-                env = os.environ.copy()
-                env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
-                
-                result = subprocess.run(
-                    ['python3', '/app/backend/isolated_scraper.py'],
-                    input=json.dumps(config),
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                    env=env,
-                    cwd='/app/backend'
-                )
-                
-                if result.returncode == 0 and result.stdout:
-                    return json.loads(result.stdout.strip())
-                else:
-                    return {"error": f"Process failed: {result.stderr}"}
-            except subprocess.TimeoutExpired:
-                return {"error": "Timeout"}
-            except Exception as e:
-                return {"error": str(e)}
-        
         try:
-            logger.info(f"Running isolated scraper for {supplier['name']} - {medida}")
+            logger.info(f"Running background scraper for {supplier['name']} - {medida}")
             
-            # Run in thread pool to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                data = await loop.run_in_executor(executor, run_scraper)
+            # Write config to file
+            with open(config_file, 'w') as f:
+                json.dump(config, f)
             
-            price = data.get('price')
-            error = data.get('error')
+            # Run scraper as completely independent background process
+            env = os.environ.copy()
+            env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
             
-            if error:
-                logger.warning(f"Isolated scraper error for {supplier['name']}: {error}")
+            process = subprocess.Popen(
+                ['python3', '/app/backend/background_scraper.py', config_file, result_file],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                cwd='/app/backend',
+                start_new_session=True  # Completely detach from parent
+            )
             
-            if price:
-                logger.info(f"Isolated scraper found price for {supplier['name']}: €{price}")
-                return float(price)
-            else:
-                logger.info(f"Isolated scraper: No price found for {supplier['name']}")
-                return None
+            # Wait for result with timeout
+            timeout = 120  # 2 minutes
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                # Check if result file exists
+                if os.path.exists(result_file):
+                    await asyncio.sleep(0.5)  # Small delay to ensure file is fully written
+                    try:
+                        with open(result_file, 'r') as f:
+                            data = json.load(f)
+                        
+                        # Clean up files
+                        os.remove(config_file)
+                        os.remove(result_file)
+                        
+                        price = data.get('price')
+                        error = data.get('error')
+                        
+                        if error:
+                            logger.warning(f"Background scraper error for {supplier['name']}: {error}")
+                        
+                        if price:
+                            logger.info(f"Background scraper found price for {supplier['name']}: €{price}")
+                            return float(price)
+                        else:
+                            logger.info(f"Background scraper: No price found for {supplier['name']}")
+                            return None
+                    except json.JSONDecodeError:
+                        # File not fully written yet
+                        await asyncio.sleep(1)
+                        continue
+                
+                # Check if process has finished with error
+                if process.poll() is not None and not os.path.exists(result_file):
+                    logger.error(f"Background scraper process died without result for {supplier['name']}")
+                    break
+                
+                await asyncio.sleep(2)
+            
+            # Timeout - kill process if still running
+            if process.poll() is None:
+                process.kill()
+            
+            # Clean up files if they exist
+            if os.path.exists(config_file):
+                os.remove(config_file)
+            if os.path.exists(result_file):
+                os.remove(result_file)
+            
+            logger.error(f"Background scraper timeout for {supplier['name']}")
+            return None
                 
         except Exception as e:
-            logger.error(f"Isolated scraper exception for {supplier['name']}: {str(e)}")
+            logger.error(f"Background scraper exception for {supplier['name']}: {str(e)}")
+            # Clean up
+            if os.path.exists(config_file):
+                os.remove(config_file)
+            if os.path.exists(result_file):
+                os.remove(result_file)
             return None
     
     async def scrape_product(self, supplier: Dict[str, Any], medida: str, marca: str, 
