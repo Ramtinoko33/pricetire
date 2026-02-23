@@ -196,107 +196,81 @@ async def scrape_dispnal(username: str, password: str, medida: str) -> dict:
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
         
         try:
-            # Login
+            # Go to homepage
             await page.goto("https://dispnal.pt/home/homepage", wait_until="networkidle", timeout=60000)
             await asyncio.sleep(3)
             
-            # Save initial page for debugging
             content = await page.content()
             
-            # Look for login form
-            # Try common login selectors
-            login_selectors = [
-                'input[type="email"]',
-                'input[name="email"]',
-                'input[name="username"]',
-                'input[type="text"]',
-            ]
-            
-            username_filled = False
-            for selector in login_selectors:
-                elem = page.locator(selector).first
-                if await elem.count() > 0 and await elem.is_visible():
-                    await elem.fill(username)
-                    username_filled = True
-                    break
-            
-            if not username_filled:
-                # Maybe need to click a login button first
-                login_btn = page.locator('a:has-text("Login"), a:has-text("Entrar"), button:has-text("Login")')
-                if await login_btn.count() > 0:
-                    await login_btn.first.click()
+            # Check if we need to login first
+            if 'Entrar' in content or 'Login' in content:
+                # Look for login link/button
+                login_link = page.locator('a:has-text("Entrar"), a:has-text("Login")')
+                if await login_link.count() > 0:
+                    await login_link.first.click()
                     await asyncio.sleep(2)
-                    
-                    # Try again
-                    for selector in login_selectors:
-                        elem = page.locator(selector).first
-                        if await elem.count() > 0 and await elem.is_visible():
-                            await elem.fill(username)
-                            username_filled = True
-                            break
+                
+                # Fill email
+                email_input = page.locator('input[type="email"], input[name*="email"]').first
+                if await email_input.count() > 0:
+                    await email_input.fill(username)
+                else:
+                    # Try text input
+                    text_input = page.locator('input[type="text"]').first
+                    if await text_input.count() > 0:
+                        await text_input.fill(username)
+                
+                # Fill password
+                password_input = page.locator('input[type="password"]').first
+                if await password_input.count() > 0:
+                    await password_input.fill(password)
+                
+                await asyncio.sleep(1)
+                
+                # Submit
+                submit_btn = page.locator('button[type="submit"], input[type="submit"]').first
+                if await submit_btn.count() > 0:
+                    await submit_btn.click()
+                else:
+                    await password_input.press("Enter")
+                
+                await asyncio.sleep(5)
+                await page.wait_for_load_state("networkidle")
             
-            # Fill password
-            password_input = page.locator('input[type="password"]').first
-            if await password_input.count() > 0:
-                await password_input.fill(password)
-            
-            await asyncio.sleep(1)
-            
-            # Submit
-            submit_selectors = [
-                'button[type="submit"]',
-                'input[type="submit"]',
-                'button:has-text("Login")',
-                'button:has-text("Entrar")',
-            ]
-            
-            for selector in submit_selectors:
-                elem = page.locator(selector).first
-                if await elem.count() > 0 and await elem.is_visible():
-                    await elem.click()
-                    break
-            
-            await asyncio.sleep(5)
-            await page.wait_for_load_state("networkidle")
-            
-            # Save post-login page for debugging
-            current_url = page.url
-            content = await page.content()
-            
-            # Debug output
-            debug_path = f"/app/tmp/dispnal_debug.html"
-            with open(debug_path, 'w') as f:
-                f.write(content)
-            
+            # Now on homepage - use the medida search field
             medida_normalized = normalize_medida(medida)
             
-            # Look for search functionality
-            search_selectors = [
-                'input[type="search"]',
-                'input[placeholder*="pesqui"]',
-                'input[placeholder*="search"]',
-                'input[name*="search"]',
-                'input[name*="medida"]',
-            ]
-            
-            search_found = False
-            for selector in search_selectors:
-                elem = page.locator(selector).first
-                if await elem.count() > 0 and await elem.is_visible():
-                    await elem.fill(medida_normalized)
-                    await elem.press("Enter")
-                    search_found = True
-                    break
-            
-            if search_found:
+            # The search field is #medida-normal with placeholder "Ex: 2245417"
+            medida_input = page.locator('#medida-normal')
+            if await medida_input.count() > 0:
+                await medida_input.fill(medida_normalized)
+                await asyncio.sleep(1)
+                
+                # Submit the search form
+                search_btn = page.locator('button[type="submit"], .btn-search, button:has-text("Pesquisar")')
+                if await search_btn.count() > 0:
+                    await search_btn.first.click()
+                else:
+                    await medida_input.press("Enter")
+                
                 await asyncio.sleep(5)
+                await page.wait_for_load_state("networkidle")
+                
                 content = await page.content()
+                
+                # Save for debugging
+                with open("/app/tmp/dispnal_results.html", 'w') as f:
+                    f.write(content)
+                
                 prices = extract_prices(content)
                 
                 if prices:
                     result["price"] = min(prices)
+                else:
+                    # Check current URL for debugging
+                    result["error"] = f"No prices found. URL: {page.url}"
             else:
-                result["error"] = f"Search not found. URL: {current_url}"
+                result["error"] = "medida-normal input not found"
                 
         except Exception as e:
             result["error"] = str(e)
