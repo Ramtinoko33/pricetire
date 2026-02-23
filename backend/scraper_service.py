@@ -947,7 +947,9 @@ class ScraperService:
     
     async def scrape_product_isolated(self, supplier: Dict[str, Any], medida: str) -> Optional[float]:
         """Scrape product using isolated subprocess - bypasses anti-bot detection"""
+        import subprocess
         import json
+        from concurrent.futures import ThreadPoolExecutor
         
         config = {
             "supplier": supplier['name'],
@@ -956,46 +958,50 @@ class ScraperService:
             "medida": medida
         }
         
+        def run_scraper():
+            """Run scraper in thread"""
+            try:
+                env = os.environ.copy()
+                env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
+                
+                result = subprocess.run(
+                    ['python3', '/app/backend/isolated_scraper.py'],
+                    input=json.dumps(config),
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env=env,
+                    cwd='/app/backend'
+                )
+                
+                if result.returncode == 0 and result.stdout:
+                    return json.loads(result.stdout.strip())
+                else:
+                    return {"error": f"Process failed: {result.stderr}"}
+            except subprocess.TimeoutExpired:
+                return {"error": "Timeout"}
+            except Exception as e:
+                return {"error": str(e)}
+        
         try:
             logger.info(f"Running isolated scraper for {supplier['name']} - {medida}")
             
-            # Use asyncio subprocess for better compatibility with FastAPI
-            process = await asyncio.create_subprocess_exec(
-                'python3', '/app/backend/isolated_scraper.py',
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd='/app/backend',
-                env={**os.environ, 'PLAYWRIGHT_BROWSERS_PATH': '/pw-browsers'}
-            )
+            # Run in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                data = await loop.run_in_executor(executor, run_scraper)
             
-            # Send config and wait for result with timeout
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(input=json.dumps(config).encode()),
-                    timeout=120  # 2 minute timeout
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                logger.error(f"Isolated scraper timeout for {supplier['name']}")
-                return None
+            price = data.get('price')
+            error = data.get('error')
             
-            if process.returncode == 0 and stdout:
-                data = json.loads(stdout.decode().strip())
-                price = data.get('price')
-                error = data.get('error')
-                
-                if error:
-                    logger.warning(f"Isolated scraper error for {supplier['name']}: {error}")
-                
-                if price:
-                    logger.info(f"Isolated scraper found price for {supplier['name']}: €{price}")
-                    return float(price)
-                else:
-                    logger.info(f"Isolated scraper: No price found for {supplier['name']}")
-                    return None
+            if error:
+                logger.warning(f"Isolated scraper error for {supplier['name']}: {error}")
+            
+            if price:
+                logger.info(f"Isolated scraper found price for {supplier['name']}: €{price}")
+                return float(price)
             else:
-                logger.error(f"Isolated scraper failed for {supplier['name']}: stdout={stdout}, stderr={stderr}")
+                logger.info(f"Isolated scraper: No price found for {supplier['name']}")
                 return None
                 
         except Exception as e:
