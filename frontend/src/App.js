@@ -7,6 +7,7 @@ import Upload from './pages/Upload';
 import Suppliers from './pages/Suppliers';
 import Results from './pages/Results';
 import Logs from './pages/Logs';
+import Scraper from './pages/Scraper';
 import '@/App.css';
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
           <Route path="/upload" element={<Upload />} />
           <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/results" element={<Results />} />
+          <Route path="/scraper" element={<Scraper />} />
           <Route path="/logs" element={<Logs />} />
         </Routes>
       </Layout>
