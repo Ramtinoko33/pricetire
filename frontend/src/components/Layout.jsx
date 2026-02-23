@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, Database, FileText, Settings } from 'lucide-react';
+import { LayoutDashboard, Upload, Database, FileText, Settings, Play } from 'lucide-react';
 
 const Layout = ({ children }) => {
   const location = useLocation();
@@ -10,6 +10,7 @@ const Layout = ({ children }) => {
     { path: '/upload', label: 'Upload', icon: Upload },
     { path: '/suppliers', label: 'Fornecedores', icon: Database },
     { path: '/results', label: 'Resultados', icon: FileText },
+    { path: '/scraper', label: 'Scraper', icon: Play },
     { path: '/logs', label: 'Logs', icon: Settings },
   ];
 
