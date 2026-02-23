@@ -46,18 +46,14 @@ async def scrape_mp24(username: str, password: str, medida: str) -> dict:
     """Scrape MP24 in isolated context"""
     result = {"supplier": "MP24", "price": None, "error": None}
     
-    # Add debug logging to file
-    import sys
-    debug_log = open('/app/tmp/mp24_subprocess_debug.log', 'a')
-    debug_log.write(f"\n=== MP24 scrape started: {medida} ===\n")
+    debug_log = open('/app/tmp/mp24_subprocess_debug.log', 'w')  # Overwrite each time
+    debug_log.write(f"=== MP24 scrape: {medida} ===\n")
     
     async with async_playwright() as p:
-        debug_log.write("Playwright started\n")
         browser = await p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
         )
-        debug_log.write("Browser launched\n")
         context = await browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             viewport={'width': 1920, 'height': 1080},
@@ -65,102 +61,86 @@ async def scrape_mp24(username: str, password: str, medida: str) -> dict:
         )
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
-        debug_log.write("Page created\n")
         
         try:
             # Login
-            debug_log.write(f"Navigating to login page...\n")
             await page.goto("https://pt.mp24.online/pt_PT", wait_until="networkidle", timeout=60000)
-            debug_log.write(f"On login page, URL: {page.url}\n")
+            debug_log.write(f"On login page: {page.url}\n")
             
-            await page.locator('input[name="_username"]').fill(username)
-            await page.locator('input[name="_password"]').fill(password)
+            # Fill credentials
+            await page.fill('input[name="_username"]', username)
+            await page.fill('input[name="_password"]', password)
             debug_log.write("Credentials filled\n")
             
-            await page.locator('a:has-text("Início de sessão")').click()
-            debug_log.write("Login clicked\n")
+            # Try multiple submission methods
+            # Method 1: Click the login link
+            try:
+                await page.click('a:has-text("Início de sessão")')
+                debug_log.write("Clicked login link\n")
+            except:
+                debug_log.write("Click failed, trying JS submit\n")
+                # Method 2: Submit form via JavaScript
+                await page.evaluate("document.getElementById('login_form').submit()")
             
-            # Wait for full page load after login
-            await asyncio.sleep(5)
-            await page.wait_for_load_state("networkidle")
+            # Wait for navigation
+            await asyncio.sleep(4)
             
-            # Check where we are after login
-            post_login_url = page.url
-            debug_log.write(f"Post-login URL: {post_login_url}\n")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except:
+                pass
             
-            # Navigate to tyres page - let the redirect happen naturally
-            debug_log.write("Navigating to tyres page...\n")
+            debug_log.write(f"After login: {page.url}\n")
+            
+            # Navigate directly to tyres page
             await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(3)
             
-            # Wait and let any JS redirects happen
-            await asyncio.sleep(5)
+            current_url = page.url
+            debug_log.write(f"On tyres: {current_url}\n")
             
-            # Check final URL
-            tyres_url = page.url
-            debug_log.write(f"On tyres page, URL: {tyres_url}\n")
-            
-            medida_normalized = normalize_medida(medida)
-            
-            # Check page content
             content = await page.content()
             has_matchcode = 'matchcodeField' in content
-            has_login = 'login' in tyres_url.lower()
-            debug_log.write(f"has_matchcode: {has_matchcode}, has_login: {has_login}\n")
+            debug_log.write(f"has_matchcode: {has_matchcode}\n")
             
-            # If still on login page, try alternative approach
-            if has_login or not has_matchcode:
-                debug_log.write("Trying alternative navigation...\n")
-                # Try clicking on the Turismo menu item
-                turismo_link = page.locator('a:has-text("Turismo")')
-                if await turismo_link.count() > 0:
-                    await turismo_link.first.click()
-                    await asyncio.sleep(5)
-                    await page.wait_for_load_state("networkidle")
-                    tyres_url = page.url
-                    debug_log.write(f"After clicking Turismo, URL: {tyres_url}\n")
-                    content = await page.content()
-                    has_matchcode = 'matchcodeField' in content
-            
-            # Save page for debug
-            with open('/app/tmp/mp24_subprocess_page.html', 'w') as f:
+            # Save debug page
+            with open('/app/tmp/mp24_page.html', 'w') as f:
                 f.write(content)
-            debug_log.write("Page saved\n")
             
-            # Use matchcode search
-            matchcode_input = page.locator('#matchcodeField')
-            count = await matchcode_input.count()
-            debug_log.write(f"matchcodeField count: {count}\n")
-            
-            if count > 0:
-                await matchcode_input.fill(medida_normalized)
+            if has_matchcode:
+                medida_normalized = normalize_medida(medida)
+                await page.fill('#matchcodeField', medida_normalized)
                 await asyncio.sleep(1)
                 
-                submit_btn = page.locator('button[type="submit"]').first
-                if await submit_btn.count() > 0:
-                    await submit_btn.click()
-                else:
-                    await matchcode_input.press("Enter")
+                # Submit search
+                try:
+                    await page.click('button[type="submit"]')
+                except:
+                    await page.press('#matchcodeField', 'Enter')
                 
-                debug_log.write("Search submitted\n")
                 await asyncio.sleep(5)
                 await page.wait_for_load_state("networkidle")
                 
                 content = await page.content()
                 prices = extract_prices(content)
-                debug_log.write(f"Prices found: {prices}\n")
+                debug_log.write(f"Prices: {prices[:5] if prices else 'none'}\n")
                 
                 if prices:
                     result["price"] = min(prices)
             else:
-                result["error"] = "matchcodeField not found"
-                debug_log.write(f"ERROR: matchcodeField not found\n")
+                # Check if we're on login page
+                if 'login' in current_url.lower() or 'conecte-se' in content.lower():
+                    result["error"] = "Login failed - session expired"
+                else:
+                    result["error"] = "matchcodeField not found"
+                debug_log.write(f"ERROR: {result['error']}\n")
                 
         except Exception as e:
             result["error"] = str(e)
             debug_log.write(f"EXCEPTION: {e}\n")
         finally:
             await browser.close()
-            debug_log.write("Browser closed\n")
+            debug_log.write("Done\n")
             debug_log.close()
     
     return result
