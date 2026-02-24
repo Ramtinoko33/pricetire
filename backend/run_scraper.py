@@ -65,27 +65,58 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
     
     try:
         # Login
+        print("  [MP24] Logging in...")
         await page.goto("https://pt.mp24.online/pt_PT", wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(2)
+        
         await page.locator('input[name="_username"]').fill(username)
         await page.locator('input[name="_password"]').fill(password)
         await page.locator('a:has-text("Início de sessão")').click()
-        await asyncio.sleep(3)
+        await asyncio.sleep(4)
         
         # Navigate to tyres page
+        print("  [MP24] Navigating to tyres page...")
         await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
         
         medida_norm = normalize_medida(medida)
         
-        # Wait for matchcode field
+        # Wait for matchcode field with increased timeout
+        print("  [MP24] Looking for matchcode field...")
         try:
-            await page.wait_for_selector('#matchcodeField', timeout=10000)
+            await page.wait_for_selector('#matchcodeField', timeout=15000)
         except:
-            result["error"] = "matchcodeField not found"
+            # Try alternative: use dropdown filters
+            print("  [MP24] matchcodeField not found, trying filters...")
+            try:
+                # Parse medida: 2055516 -> width=205, profile=55, rim=16
+                if len(medida_norm) >= 6:
+                    width = medida_norm[:3]
+                    profile = medida_norm[3:5]
+                    rim = medida_norm[5:]
+                    
+                    await page.select_option('#filterTop12', width)
+                    await asyncio.sleep(1)
+                    await page.select_option('#filterTop13', profile)
+                    await asyncio.sleep(1)
+                    await page.select_option('#filterTop14', rim)
+                    await asyncio.sleep(3)
+                    
+                    content = await page.content()
+                    prices = extract_prices(content)
+                    if prices:
+                        result["price"] = min(prices)
+                        result["all_prices"] = sorted(prices)[:10]
+                        return result
+            except Exception as filter_e:
+                print(f"  [MP24] Filter method also failed: {filter_e}")
+            
+            result["error"] = "matchcodeField not found and filters failed"
             return result
         
         matchcode = page.locator('#matchcodeField')
         if await matchcode.count() > 0:
+            print(f"  [MP24] Searching for: {medida_norm}")
             await matchcode.fill(medida_norm)
             await asyncio.sleep(1)
             
@@ -104,10 +135,14 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
             if prices:
                 result["price"] = min(prices)
                 result["all_prices"] = sorted(prices)[:10]
+                print(f"  [MP24] Found {len(prices)} prices, best: €{result['price']}")
+            else:
+                result["error"] = "No prices found in results"
         else:
             result["error"] = "Search field not found"
     except Exception as e:
         result["error"] = str(e)
+        print(f"  [MP24] Error: {e}")
     
     return result
 
