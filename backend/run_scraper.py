@@ -323,6 +323,108 @@ async def run_scraper(medidas: list, supplier_filter: str = None):
     
     return results
 
+def run_supplier(supplier_id: str, sizes: list, job_id: str = None):
+    """
+    Synchronous function called by worker.py
+    Runs scraping for a single supplier
+    """
+    print(f"run_supplier called: supplier_id={supplier_id}, sizes={sizes}, job_id={job_id}")
+    
+    # Run async scraper in sync context
+    asyncio.run(_run_supplier_async(supplier_id, sizes, job_id))
+
+async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None):
+    """Async implementation of run_supplier"""
+    print(f"Starting scraper for supplier {supplier_id}")
+    
+    # Get supplier from DB
+    client = AsyncIOMotorClient(MONGO_URL)
+    db = client[DB_NAME]
+    
+    # Try finding by id field or by name
+    supplier = await db.suppliers.find_one({"id": supplier_id})
+    if not supplier:
+        supplier = await db.suppliers.find_one({"name": {"$regex": supplier_id, "$options": "i"}})
+    
+    if not supplier:
+        print(f"Supplier not found: {supplier_id}")
+        client.close()
+        return
+    
+    supplier_name = supplier['name'].lower()
+    username = supplier['username']
+    password = supplier['password']
+    
+    print(f"Found supplier: {supplier['name']}")
+    print(f"Sizes to scrape: {sizes}")
+    
+    results = []
+    
+    # Run scraping with fresh browser
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
+        )
+        
+        context = await browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            viewport={'width': 1920, 'height': 1080},
+            locale='pt-PT',
+        )
+        
+        page = await context.new_page()
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
+        
+        for medida in sizes:
+            try:
+                print(f"Scraping {supplier['name']} for size {medida}...")
+                
+                if 'mp24' in supplier_name:
+                    result = await scrape_mp24(page, username, password, medida)
+                elif 'prismanil' in supplier_name:
+                    result = await scrape_prismanil(page, username, password, medida)
+                elif 'dispnal' in supplier_name:
+                    result = await scrape_dispnal(page, username, password, medida)
+                else:
+                    result = {"supplier": supplier['name'], "price": None, "error": "Adapter not implemented"}
+                
+                result["medida"] = medida
+                result["job_id"] = job_id
+                results.append(result)
+                
+                # Save to database
+                price_doc = {
+                    "supplier_name": supplier['name'],
+                    "supplier_id": supplier_id,
+                    "medida": medida,
+                    "price": result.get('price'),
+                    "error": result.get('error'),
+                    "job_id": job_id,
+                    "scraped_at": datetime.now(timezone.utc),
+                }
+                
+                await db.scraped_prices.update_one(
+                    {"supplier_name": supplier['name'], "medida": medida},
+                    {"$set": price_doc},
+                    upsert=True
+                )
+                
+                if result.get('price'):
+                    print(f"  Result: €{result['price']}")
+                else:
+                    print(f"  Result: {result.get('error', 'No price found')}")
+                    
+            except Exception as e:
+                print(f"  Error scraping {medida}: {e}")
+                results.append({"supplier": supplier['name'], "medida": medida, "error": str(e)})
+        
+        await browser.close()
+    
+    client.close()
+    print(f"Finished scraping {supplier['name']}")
+    return results
+
 async def main():
     parser = argparse.ArgumentParser(description='Run tire price scraper')
     parser.add_argument('--supplier', type=str, help='Filter by supplier name')
