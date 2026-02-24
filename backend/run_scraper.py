@@ -390,7 +390,12 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
     
     supplier_name = supplier['name'].lower()
     username = supplier['username']
-    password = supplier['password']
+    # Use password_raw (plain text) for scraping, fallback to password if not hashed
+    password = supplier.get('password_raw') or supplier.get('password', '')
+    
+    # Check if password is hashed (bcrypt hashes start with $2)
+    if password.startswith('$2'):
+        print(f"WARNING: Password appears to be hashed for {supplier['name']}. Scraping may fail.")
     
     print(f"Found supplier: {supplier['name']}")
     print(f"Sizes to scrape: {sizes}")
