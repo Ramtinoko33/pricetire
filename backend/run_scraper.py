@@ -561,6 +561,10 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
                     result = await scrape_prismanil(page, username, password, medida)
                 elif 'dispnal' in supplier_name:
                     result = await scrape_dispnal(page, username, password, medida)
+                elif 'josé' in supplier_name or 'jose' in supplier_name:
+                    result = await scrape_sjose(page, username, password, medida)
+                elif 'euromais' in supplier_name or 'eurotyre' in supplier_name:
+                    result = await scrape_euromais(page, username, password, medida)
                 else:
                     result = {"supplier": supplier['name'], "price": None, "error": "Adapter not implemented"}
                 
