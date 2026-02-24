@@ -252,6 +252,126 @@ async def scrape_dispnal(page, username: str, password: str, medida: str) -> dic
     
     return result
 
+async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
+    """Scrape S. José Pneus"""
+    result = {"supplier": "S. José Pneus", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
+    
+    try:
+        print("  [S. José] Logging in...")
+        await page.goto("https://b2b.sjosepneus.com/login.aspx", wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(2)
+        
+        # Fill login form
+        username_input = page.locator('#ContentPlaceHolder1_ctrlLogin_Login_UserName')
+        if await username_input.count() > 0:
+            await username_input.fill(username)
+        
+        password_input = page.locator('#ContentPlaceHolder1_ctrlLogin_Login_Password')
+        if await password_input.count() > 0:
+            await password_input.fill(password)
+        
+        # Click login button
+        login_btn = page.locator('#ContentPlaceHolder1_ctrlLogin_Login_LoginButton, input[type="submit"]')
+        if await login_btn.count() > 0:
+            await login_btn.first.click()
+        await asyncio.sleep(5)
+        
+        print("  [S. José] Searching for products...")
+        medida_norm = normalize_medida(medida)
+        
+        # Try to find search field
+        search_input = page.locator('input[type="text"][id*="search"], input[type="text"][name*="pesq"]').first
+        if await search_input.count() > 0:
+            await search_input.fill(medida_norm)
+            await search_input.press('Enter')
+            await asyncio.sleep(5)
+            
+            content = await page.content()
+            prices = extract_prices(content)
+            if prices:
+                result["price"] = min(prices)
+                result["all_prices"] = sorted(prices)[:10]
+                print(f"  [S. José] Found {len(prices)} prices, best: €{result['price']}")
+            else:
+                result["error"] = "No prices found"
+        else:
+            # Look for tire category link
+            tyre_link = page.locator('a:has-text("Pneu"), a:has-text("Turismo")')
+            if await tyre_link.count() > 0:
+                await tyre_link.first.click()
+                await asyncio.sleep(3)
+            
+            content = await page.content()
+            with open('/app/tmp/sjose_after_login.html', 'w') as f:
+                f.write(content)
+            result["error"] = "Search interface not found"
+            
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"  [S. José] Error: {e}")
+    
+    return result
+
+async def scrape_euromais(page, username: str, password: str, medida: str) -> dict:
+    """Scrape Euromais/Eurotyre"""
+    result = {"supplier": "euromais", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
+    
+    try:
+        print("  [Euromais] Logging in...")
+        await page.goto("https://www.eurotyre.pt/", wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(2)
+        
+        # Look for login link/button
+        login_link = page.locator('a:has-text("Entrar"), a:has-text("Login"), button:has-text("Login")')
+        if await login_link.count() > 0:
+            await login_link.first.click()
+            await asyncio.sleep(2)
+        
+        # Fill login form
+        username_input = page.locator('input[type="text"], input[type="email"]').first
+        if await username_input.count() > 0:
+            await username_input.fill(username)
+        
+        password_input = page.locator('input[type="password"]').first
+        if await password_input.count() > 0:
+            await password_input.fill(password)
+        
+        # Submit login
+        submit_btn = page.locator('button[type="submit"], input[type="submit"]').first
+        if await submit_btn.count() > 0:
+            await submit_btn.click()
+        await asyncio.sleep(5)
+        
+        print("  [Euromais] Searching for products...")
+        medida_norm = normalize_medida(medida)
+        
+        # Try to find search field
+        search_input = page.locator('input[type="search"], input[placeholder*="pesq"], input[name*="search"]').first
+        if await search_input.count() > 0:
+            await search_input.fill(medida_norm)
+            await search_input.press('Enter')
+            await asyncio.sleep(5)
+            
+            content = await page.content()
+            prices = extract_prices(content)
+            if prices:
+                result["price"] = min(prices)
+                result["all_prices"] = sorted(prices)[:10]
+                print(f"  [Euromais] Found {len(prices)} prices, best: €{result['price']}")
+            else:
+                result["error"] = "No prices found"
+        else:
+            content = await page.content()
+            with open('/app/tmp/euromais_after_login.html', 'w') as f:
+                f.write(content)
+            result["error"] = "Search interface not found"
+            
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"  [Euromais] Error: {e}")
+    
+    return result
+
 async def get_suppliers_from_db():
     """Get active suppliers from MongoDB"""
     client = AsyncIOMotorClient(MONGO_URL)
