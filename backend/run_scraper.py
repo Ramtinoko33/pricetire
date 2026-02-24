@@ -60,21 +60,26 @@ def normalize_medida(medida: str) -> str:
     return medida.replace('/', '').replace('R', '').replace('r', '')
 
 async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
-    """Scrape MP24"""
+    """Scrape MP24 (always does full login)"""
+    return await scrape_mp24_with_session(page, username, password, medida, already_logged_in=False)
+
+async def scrape_mp24_with_session(page, username: str, password: str, medida: str, already_logged_in: bool = False) -> dict:
+    """Scrape MP24 with session reuse support"""
     result = {"supplier": "MP24", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
     
     try:
-        # Login
-        print("  [MP24] Logging in...")
-        await page.goto("https://pt.mp24.online/pt_PT", wait_until="networkidle", timeout=60000)
-        await asyncio.sleep(2)
+        if not already_logged_in:
+            # Login
+            print("  [MP24] Logging in...")
+            await page.goto("https://pt.mp24.online/pt_PT", wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(2)
+            
+            await page.locator('input[name="_username"]').fill(username)
+            await page.locator('input[name="_password"]').fill(password)
+            await page.locator('a:has-text("Início de sessão")').click()
+            await asyncio.sleep(5)
         
-        await page.locator('input[name="_username"]').fill(username)
-        await page.locator('input[name="_password"]').fill(password)
-        await page.locator('a:has-text("Início de sessão")').click()
-        await asyncio.sleep(5)
-        
-        # Navigate to tyres page
+        # Navigate to tyres page (always needed for new search)
         print("  [MP24] Navigating to tyres page...")
         await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=60000)
         await asyncio.sleep(3)
