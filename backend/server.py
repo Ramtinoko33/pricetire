@@ -355,7 +355,8 @@ async def run_scraping_job(job_id: str):
 
 @api_router.get("/jobs", response_model=List[Job])
 async def get_jobs():
-    jobs = await db.jobs.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Filter out scrape queue jobs (which have type field)
+    jobs = await db.jobs.find({"type": {"$exists": False}}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return [Job(**job) for job in jobs]
 
 @api_router.get("/jobs/{job_id}", response_model=Job)
