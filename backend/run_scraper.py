@@ -455,6 +455,10 @@ async def run_scraper(medidas: list, supplier_filter: str = None):
                         result = await scrape_prismanil(page, supplier['username'], supplier['password'], medida)
                     elif 'dispnal' in supplier_name:
                         result = await scrape_dispnal(page, supplier['username'], supplier['password'], medida)
+                    elif 'josé' in supplier_name or 'jose' in supplier_name:
+                        result = await scrape_sjose(page, supplier['username'], supplier['password'], medida)
+                    elif 'euromais' in supplier_name or 'eurotyre' in supplier_name:
+                        result = await scrape_euromais(page, supplier['username'], supplier['password'], medida)
                     else:
                         result = {"supplier": supplier['name'], "price": None, "error": "Adapter not implemented"}
                     
