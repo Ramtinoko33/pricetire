@@ -402,7 +402,7 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
     
     results = []
     
-    # Run scraping with fresh browser
+    # Run scraping with ONE browser for all sizes (reuse session)
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -418,12 +418,16 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
         
+        # Do login once for the supplier
+        logged_in = False
+        
         for medida in sizes:
             try:
                 print(f"Scraping {supplier['name']} for size {medida}...")
                 
                 if 'mp24' in supplier_name:
-                    result = await scrape_mp24(page, username, password, medida)
+                    result = await scrape_mp24_with_session(page, username, password, medida, logged_in)
+                    logged_in = True  # After first scrape, we're logged in
                 elif 'prismanil' in supplier_name:
                     result = await scrape_prismanil(page, username, password, medida)
                 elif 'dispnal' in supplier_name:
