@@ -72,34 +72,63 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
         await page.locator('input[name="_username"]').fill(username)
         await page.locator('input[name="_password"]').fill(password)
         await page.locator('a:has-text("Início de sessão")').click()
-        await asyncio.sleep(4)
+        await asyncio.sleep(5)
         
         # Navigate to tyres page
         print("  [MP24] Navigating to tyres page...")
-        await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=30000)
+        await page.goto("https://pt.mp24.online/pt_PT/tyres/", wait_until="networkidle", timeout=60000)
         await asyncio.sleep(3)
         
         medida_norm = normalize_medida(medida)
         
-        # Wait for matchcode field with increased timeout
+        # Find matchcode field
         print("  [MP24] Looking for matchcode field...")
-        try:
-            await page.wait_for_selector('#matchcodeField', timeout=15000)
-        except:
-            # Try alternative: use dropdown filters
+        matchcode_input = page.locator('#matchcodeField')
+        count = await matchcode_input.count()
+        
+        if count > 0:
+            # Scroll to element and fill
+            await matchcode_input.scroll_into_view_if_needed()
+            await asyncio.sleep(1)
+            await matchcode_input.fill(medida_norm)
+            print(f"  [MP24] Searching for: {medida_norm}")
+            await asyncio.sleep(1)
+            
+            # Find and click the submit button for this form (form id="matchcode")
+            form = page.locator('#matchcode')
+            submit_btn = form.locator('button[type="submit"]')
+            
+            if await submit_btn.count() > 0:
+                await submit_btn.click()
+            else:
+                await matchcode_input.press('Enter')
+            
+            await asyncio.sleep(5)
+            await page.wait_for_load_state("networkidle")
+            
+            content = await page.content()
+            prices = extract_prices(content)
+            
+            if prices:
+                result["price"] = min(prices)
+                result["all_prices"] = sorted(prices)[:10]
+                print(f"  [MP24] Found {len(prices)} prices, best: €{result['price']}")
+            else:
+                result["error"] = "No prices found in results"
+        else:
+            # Fallback: try dropdown filters
             print("  [MP24] matchcodeField not found, trying filters...")
             try:
-                # Parse medida: 2055516 -> width=205, profile=55, rim=16
                 if len(medida_norm) >= 6:
                     width = medida_norm[:3]
                     profile = medida_norm[3:5]
                     rim = medida_norm[5:]
                     
-                    await page.select_option('#filterTop12', width)
+                    await page.select_option('#filterTop12', width, timeout=10000)
                     await asyncio.sleep(1)
-                    await page.select_option('#filterTop13', profile)
+                    await page.select_option('#filterTop13', profile, timeout=10000)
                     await asyncio.sleep(1)
-                    await page.select_option('#filterTop14', rim)
+                    await page.select_option('#filterTop14', rim, timeout=10000)
                     await asyncio.sleep(3)
                     
                     content = await page.content()
@@ -112,34 +141,7 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
                 print(f"  [MP24] Filter method also failed: {filter_e}")
             
             result["error"] = "matchcodeField not found and filters failed"
-            return result
-        
-        matchcode = page.locator('#matchcodeField')
-        if await matchcode.count() > 0:
-            print(f"  [MP24] Searching for: {medida_norm}")
-            await matchcode.fill(medida_norm)
-            await asyncio.sleep(1)
             
-            # Click submit
-            submit_btn = page.locator('button[type="submit"]').first
-            if await submit_btn.count() > 0:
-                await submit_btn.click()
-            else:
-                await matchcode.press('Enter')
-            
-            await asyncio.sleep(5)
-            await page.wait_for_load_state("networkidle")
-            
-            content = await page.content()
-            prices = extract_prices(content)
-            if prices:
-                result["price"] = min(prices)
-                result["all_prices"] = sorted(prices)[:10]
-                print(f"  [MP24] Found {len(prices)} prices, best: €{result['price']}")
-            else:
-                result["error"] = "No prices found in results"
-        else:
-            result["error"] = "Search field not found"
     except Exception as e:
         result["error"] = str(e)
         print(f"  [MP24] Error: {e}")
