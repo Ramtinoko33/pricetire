@@ -30,7 +30,7 @@ const ScraperPage = () => {
 
   const loadScraperStatus = async () => {
     try {
-      const { data } = await api.get('/api/scraper/status');
+      const { data } = await api.get('/scraper/status');
       setScraperStatus(data);
       setPolling(data.running);
     } catch (error) {
@@ -40,7 +40,7 @@ const ScraperPage = () => {
 
   const loadScrapedPrices = async () => {
     try {
-      const { data } = await api.get('/api/scraped-prices');
+      const { data } = await api.get('/scraped-prices');
       setScrapedPrices(data);
     } catch (error) {
       console.error('Error loading scraped prices:', error);
@@ -51,7 +51,7 @@ const ScraperPage = () => {
     setLoading(true);
     try {
       const medidaNorm = medida.replace('/', '').replace('R', '');
-      await api.post('/api/scraper/run', { medidas: [medidaNorm] });
+      await api.post('/scraper/run', { medidas: [medidaNorm] });
       setPolling(true);
       loadScraperStatus();
     } catch (error) {
@@ -64,7 +64,7 @@ const ScraperPage = () => {
 
   const getBestPrice = async () => {
     try {
-      const { data } = await api.get(`/api/scraped-prices/best/${medida}`);
+      const { data } = await api.get(`/scraped-prices/best/${medida}`);
       if (data.best_price) {
         alert(`Melhor preço para ${medida}: €${data.best_price} (${data.best_supplier})`);
       } else {
