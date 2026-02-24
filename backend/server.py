@@ -579,6 +579,60 @@ async def get_best_price(medida: str):
     
     return {"medida": medida, "best_price": None, "message": "No prices found"}
 
+# ==================== Worker Queue Endpoints ====================
+
+from pydantic import BaseModel as PydanticBaseModel
+
+class EnqueueReq(PydanticBaseModel):
+    supplier_id: str
+    sizes: List[str]
+    meta: Optional[dict] = None
+
+@api_router.post("/scrape/enqueue")
+async def enqueue_scrape(req: EnqueueReq):
+    """Enqueue a scraping job for the worker"""
+    job = {
+        "type": "scrape",
+        "supplier_id": req.supplier_id,
+        "payload": {"sizes": req.sizes, "meta": req.meta or {}},
+        "status": "queued",
+        "attempts": 0,
+        "created_at": datetime.utcnow(),
+        "started_at": None,
+        "finished_at": None,
+        "last_error": None,
+    }
+    res = await db.jobs.insert_one(job)
+    return {"ok": True, "job_id": str(res.inserted_id)}
+
+@api_router.get("/scrape/jobs")
+async def get_scrape_jobs(status: str = None, limit: int = 20):
+    """Get scraping jobs from queue"""
+    query = {"type": "scrape"}
+    if status:
+        query["status"] = status
+    
+    jobs = await db.jobs.find(query).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Convert ObjectId to string
+    for job in jobs:
+        job["_id"] = str(job["_id"])
+    
+    return jobs
+
+@api_router.get("/scrape/jobs/{job_id}")
+async def get_scrape_job(job_id: str):
+    """Get a specific scraping job"""
+    from bson import ObjectId
+    try:
+        job = await db.jobs.find_one({"_id": ObjectId(job_id)})
+        if job:
+            job["_id"] = str(job["_id"])
+            return job
+        raise HTTPException(status_code=404, detail="Job not found")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 app.include_router(api_router)
 
 app.add_middleware(
