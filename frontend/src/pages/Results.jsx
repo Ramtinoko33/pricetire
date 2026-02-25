@@ -133,6 +133,21 @@ const Results = () => {
             <RefreshCw size={18} className="mr-2" />
             Atualizar
           </Button>
+          {selectedJob && (
+            <Button 
+              variant="outline" 
+              onClick={() => handleCompare(selectedJob)} 
+              disabled={comparing}
+              data-testid="compare-btn"
+            >
+              {comparing ? (
+                <Loader2 size={18} className="mr-2 animate-spin" />
+              ) : (
+                <Scale size={18} className="mr-2" />
+              )}
+              Comparar Preços
+            </Button>
+          )}
           {selectedJob && currentJob?.status === 'completed' && (
             <Button onClick={() => handleExport(selectedJob)} data-testid="export-btn">
               <Download size={18} className="mr-2" />
