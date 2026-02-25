@@ -4,9 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Plus, Trash2, TestTube, Power, Loader2 } from 'lucide-react';
+import { Plus, Trash2, TestTube, Power, Loader2, Code } from 'lucide-react';
 import { toast } from 'sonner';
 import SupplierForm from '../components/SupplierForm';
+import SelectorsForm from '../components/SelectorsForm';
 
 const Suppliers = () => {
   const [suppliers, setSuppliers] = useState([]);
@@ -14,6 +15,8 @@ const Suppliers = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const [testingId, setTestingId] = useState(null);
+  const [selectorsOpen, setSelectorsOpen] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
 
   useEffect(() => {
     loadSuppliers();
