@@ -701,22 +701,53 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
                 result["job_id"] = job_id
                 results.append(result)
                 
-                # Save to database
-                price_doc = {
-                    "supplier_name": supplier['name'],
-                    "supplier_id": supplier_id,
-                    "medida": medida,
-                    "price": result.get('price'),
-                    "error": result.get('error'),
-                    "job_id": job_id,
-                    "scraped_at": datetime.now(timezone.utc),
-                }
+                # Save to database - save ALL products with brand/model
+                products = result.get('products', [])
                 
-                await db.scraped_prices.update_one(
-                    {"supplier_name": supplier['name'], "medida": medida},
-                    {"$set": price_doc},
-                    upsert=True
-                )
+                if products:
+                    # Save each product individually
+                    for prod in products:
+                        price_doc = {
+                            "supplier_name": supplier['name'],
+                            "supplier_id": supplier_id,
+                            "medida": medida,
+                            "marca": prod.get('brand', '').upper(),
+                            "modelo": prod.get('model', ''),
+                            "price": prod.get('price'),
+                            "job_id": job_id,
+                            "scraped_at": datetime.now(timezone.utc),
+                        }
+                        
+                        # Upsert by supplier + medida + marca
+                        await db.scraped_prices.update_one(
+                            {
+                                "supplier_name": supplier['name'], 
+                                "medida": medida,
+                                "marca": prod.get('brand', '').upper()
+                            },
+                            {"$set": price_doc},
+                            upsert=True
+                        )
+                    print(f"  Saved {len(products)} products with brand/model")
+                else:
+                    # Fallback: save single price without brand
+                    price_doc = {
+                        "supplier_name": supplier['name'],
+                        "supplier_id": supplier_id,
+                        "medida": medida,
+                        "marca": None,
+                        "modelo": None,
+                        "price": result.get('price'),
+                        "error": result.get('error'),
+                        "job_id": job_id,
+                        "scraped_at": datetime.now(timezone.utc),
+                    }
+                    
+                    await db.scraped_prices.update_one(
+                        {"supplier_name": supplier['name'], "medida": medida, "marca": None},
+                        {"$set": price_doc},
+                        upsert=True
+                    )
                 
                 if result.get('price'):
                     print(f"  Result: €{result['price']}")
