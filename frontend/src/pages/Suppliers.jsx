@@ -205,6 +205,12 @@ const Suppliers = () => {
         onSubmit={handleCreate}
         isLoading={formLoading}
       />
+
+      <SelectorsForm
+        open={selectorsOpen}
+        onClose={() => setSelectorsOpen(false)}
+        supplier={selectedSupplier}
+      />
     </div>
   );
 };
