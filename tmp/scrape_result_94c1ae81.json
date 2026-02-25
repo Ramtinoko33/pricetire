@@ -1,1 +1,0 @@
-{"supplier": "euromais", "price": null, "error": "Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"https://www.eurotyre.pt/\", waiting until \"networkidle\"\n"}
