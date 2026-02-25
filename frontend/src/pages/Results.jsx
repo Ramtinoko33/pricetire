@@ -86,6 +86,21 @@ const Results = () => {
     }
   };
 
+  const handleCompare = async (jobId) => {
+    setComparing(true);
+    try {
+      const { data } = await jobsAPI.compare(jobId);
+      toast.success(`Comparação concluída! ${data.items_with_savings} itens com economia. Total: €${data.total_savings}`);
+      loadJobResults(jobId);
+      loadJobs();
+    } catch (error) {
+      console.error('Error comparing:', error);
+      toast.error('Erro ao comparar preços');
+    } finally {
+      setComparing(false);
+    }
+  };
+
   const getStatusBadge = (status) => {
     const variants = {
       completed: 'default',
