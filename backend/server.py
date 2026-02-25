@@ -388,6 +388,82 @@ async def get_job_results(job_id: str):
     items = await db.job_items.find({"job_id": job_id}, {"_id": 0}).to_list(None)
     return items
 
+@api_router.post("/jobs/{job_id}/compare")
+async def compare_job_with_scraped_prices(job_id: str):
+    """Compare job items with existing scraped prices and update economia"""
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    items = await db.job_items.find({"job_id": job_id}, {"_id": 0}).to_list(None)
+    
+    if not items:
+        raise HTTPException(status_code=400, detail="No items found in job")
+    
+    updated_count = 0
+    found_count = 0
+    total_savings = 0.0
+    
+    for item in items:
+        # Normalize medida for matching
+        medida_norm = item['medida'].replace('/', '').replace('R', '').replace('r', '')
+        
+        # Get all scraped prices for this medida
+        scraped = await db.scraped_prices.find(
+            {"medida": medida_norm, "price": {"$ne": None}},
+            {"_id": 0}
+        ).sort("price", 1).to_list(100)
+        
+        if scraped:
+            best = scraped[0]
+            best_price = best['price']
+            best_supplier = best['supplier_name']
+            
+            # Calculate savings
+            meu_preco = item.get('meu_preco', 0)
+            economia_euro = meu_preco - best_price if meu_preco else None
+            economia_percent = (economia_euro / meu_preco * 100) if meu_preco and economia_euro else None
+            
+            # Build supplier_prices dict
+            supplier_prices = {s['supplier_name']: s['price'] for s in scraped}
+            
+            # Update item
+            await db.job_items.update_one(
+                {"id": item['id']},
+                {"$set": {
+                    "melhor_preco": best_price,
+                    "melhor_fornecedor": best_supplier,
+                    "economia_euro": economia_euro,
+                    "economia_percent": economia_percent,
+                    "supplier_prices": supplier_prices,
+                    "status": "found" if economia_euro and economia_euro > 0 else "processed"
+                }}
+            )
+            
+            updated_count += 1
+            if economia_euro and economia_euro > 0:
+                found_count += 1
+                total_savings += economia_euro
+    
+    # Update job stats
+    await db.jobs.update_one(
+        {"id": job_id},
+        {"$set": {
+            "processed_items": updated_count,
+            "found_items": found_count,
+            "total_savings": total_savings,
+            "status": JobStatus.COMPLETED.value,
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {
+        "message": "Comparison completed",
+        "items_processed": updated_count,
+        "items_with_savings": found_count,
+        "total_savings": round(total_savings, 2)
+    }
+
 @api_router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
     """Delete job and all related data"""
