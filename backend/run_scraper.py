@@ -132,8 +132,14 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
     return await scrape_mp24_with_session(page, username, password, medida, already_logged_in=False)
 
 async def scrape_mp24_with_session(page, username: str, password: str, medida: str, already_logged_in: bool = False) -> dict:
-    """Scrape MP24 with session reuse support"""
-    result = {"supplier": "MP24", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
+    """Scrape MP24 with session reuse support - extracts ALL products with brand/model"""
+    result = {
+        "supplier": "MP24", 
+        "price": None, 
+        "error": None, 
+        "products": [],  # List of all products found
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
     
     try:
         if not already_logged_in:
@@ -179,41 +185,96 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
             await asyncio.sleep(5)
             await page.wait_for_load_state("networkidle")
             
-            content = await page.content()
-            prices = extract_prices(content)
+            # Extract ALL products with brand and model
+            print("  [MP24] Extracting products...")
+            products = await page.evaluate('''() => {
+                const products = [];
+                
+                // MP24 uses table rows for products
+                const rows = document.querySelectorAll('tr.article-row, tr[class*="article"], .article-item, .tyre-row');
+                
+                rows.forEach(row => {
+                    try {
+                        const text = row.textContent || '';
+                        
+                        // Extract brand - look for manufacturer name
+                        let brand = '';
+                        const brandEl = row.querySelector('.manufacturer, .brand, td:nth-child(2), [class*="brand"]');
+                        if (brandEl) {
+                            brand = brandEl.textContent.trim().split('\\n')[0].trim();
+                        }
+                        
+                        // Extract model/profile  
+                        let model = '';
+                        const modelEl = row.querySelector('.profile, .model, .description, td:nth-child(3)');
+                        if (modelEl) {
+                            model = modelEl.textContent.trim().split('\\n')[0].trim();
+                        }
+                        
+                        // Try to get brand from text if not found
+                        if (!brand) {
+                            const knownBrands = ['MICHELIN', 'BRIDGESTONE', 'GOODYEAR', 'CONTINENTAL', 'PIRELLI', 
+                                                'DUNLOP', 'HANKOOK', 'YOKOHAMA', 'FIRESTONE', 'FALKEN',
+                                                'KUMHO', 'NEXEN', 'TOYO', 'NOKIAN', 'VREDESTEIN', 'COOPER',
+                                                'BF GOODRICH', 'UNIROYAL', 'SEMPERIT', 'BARUM', 'MATADOR',
+                                                'LAUFENN', 'ROADSTONE', 'MAXXIS', 'NANKANG', 'TRISTAR'];
+                            const textUpper = text.toUpperCase();
+                            for (const b of knownBrands) {
+                                if (textUpper.includes(b)) {
+                                    brand = b;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Extract price
+                        let price = null;
+                        const priceMatches = text.match(/€?\s*(\d+)[,\.](\d{2})\s*€?/g);
+                        if (priceMatches) {
+                            for (const pm of priceMatches) {
+                                const cleanPrice = pm.replace('€', '').trim().replace(',', '.');
+                                const p = parseFloat(cleanPrice);
+                                if (p > 15 && p < 500) {
+                                    price = p;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (price && brand) {
+                            products.push({ 
+                                brand: brand.toUpperCase(), 
+                                model: model, 
+                                price: price 
+                            });
+                        }
+                    } catch (e) {}
+                });
+                
+                return products;
+            }''')
             
-            if prices:
+            if products and len(products) > 0:
+                result["products"] = products
+                # Also set best price for backwards compatibility
+                prices = [p['price'] for p in products]
                 result["price"] = min(prices)
                 result["all_prices"] = sorted(prices)[:10]
-                print(f"  [MP24] Found {len(prices)} prices, best: €{result['price']}")
+                print(f"  [MP24] Found {len(products)} products with brand/model")
+                for p in products[:3]:
+                    print(f"    - {p['brand']} {p['model']}: €{p['price']}")
             else:
-                result["error"] = "No prices found in results"
+                # Fallback to simple price extraction
+                content = await page.content()
+                prices = extract_prices(content)
+                if prices:
+                    result["price"] = min(prices)
+                    result["all_prices"] = sorted(prices)[:10]
+                    print(f"  [MP24] Found {len(prices)} prices (no brand info), best: €{result['price']}")
+                else:
+                    result["error"] = "No prices found in results"
         else:
-            # Fallback: try dropdown filters
-            print("  [MP24] matchcodeField not found, trying filters...")
-            try:
-                if len(medida_norm) >= 6:
-                    width = medida_norm[:3]
-                    profile = medida_norm[3:5]
-                    rim = medida_norm[5:]
-                    
-                    await page.select_option('#filterTop12', width, timeout=10000)
-                    await asyncio.sleep(1)
-                    await page.select_option('#filterTop13', profile, timeout=10000)
-                    await asyncio.sleep(1)
-                    await page.select_option('#filterTop14', rim, timeout=10000)
-                    await asyncio.sleep(3)
-                    
-                    content = await page.content()
-                    prices = extract_prices(content)
-                    if prices:
-                        result["price"] = min(prices)
-                        result["all_prices"] = sorted(prices)[:10]
-                        return result
-            except Exception as filter_e:
-                print(f"  [MP24] Filter method also failed: {filter_e}")
-            
-            result["error"] = "matchcodeField not found and filters failed"
+            result["error"] = "matchcodeField not found"
             
     except Exception as e:
         result["error"] = str(e)
