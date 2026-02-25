@@ -427,7 +427,7 @@ async def get_job_results(job_id: str):
 
 @api_router.post("/jobs/{job_id}/compare")
 async def compare_job_with_scraped_prices(job_id: str):
-    """Compare job items with existing scraped prices and update economia"""
+    """Compare job items with existing scraped prices by MEDIDA + MARCA"""
     job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -439,30 +439,67 @@ async def compare_job_with_scraped_prices(job_id: str):
     
     updated_count = 0
     found_count = 0
+    matched_count = 0
     total_savings = 0.0
     
     for item in items:
-        # Normalize medida for matching
+        # Normalize medida and marca for matching
         medida_norm = item['medida'].replace('/', '').replace('R', '').replace('r', '')
+        marca_norm = (item.get('marca') or '').strip().upper()
         
-        # Get all scraped prices for this medida
+        # First try: exact match by medida + marca
         scraped = await db.scraped_prices.find(
-            {"medida": medida_norm, "price": {"$ne": None}},
+            {
+                "medida": medida_norm, 
+                "marca": marca_norm,
+                "price": {"$ne": None}
+            },
             {"_id": 0}
         ).sort("price", 1).to_list(100)
+        
+        match_type = "exact"
+        
+        # Second try: if no exact match, try partial brand match (for variations like "GOOD YEAR" vs "GOODYEAR")
+        if not scraped and marca_norm:
+            # Create regex pattern to match brand variations
+            marca_pattern = marca_norm.replace(' ', '.*')
+            scraped = await db.scraped_prices.find(
+                {
+                    "medida": medida_norm, 
+                    "marca": {"$regex": marca_pattern, "$options": "i"},
+                    "price": {"$ne": None}
+                },
+                {"_id": 0}
+            ).sort("price", 1).to_list(100)
+            match_type = "partial"
+        
+        # Third try: fallback to medida only if no brand match found
+        if not scraped:
+            scraped = await db.scraped_prices.find(
+                {
+                    "medida": medida_norm, 
+                    "price": {"$ne": None}
+                },
+                {"_id": 0}
+            ).sort("price", 1).to_list(100)
+            match_type = "medida_only"
         
         if scraped:
             best = scraped[0]
             best_price = best['price']
             best_supplier = best['supplier_name']
+            best_marca = best.get('marca', '')
             
             # Calculate savings
             meu_preco = item.get('meu_preco', 0)
             economia_euro = meu_preco - best_price if meu_preco else None
             economia_percent = (economia_euro / meu_preco * 100) if meu_preco and economia_euro else None
             
-            # Build supplier_prices dict
-            supplier_prices = {s['supplier_name']: s['price'] for s in scraped}
+            # Build supplier_prices dict with brand info
+            supplier_prices = {}
+            for s in scraped:
+                key = f"{s['supplier_name']} ({s.get('marca', 'N/A')})"
+                supplier_prices[key] = s['price']
             
             # Update item
             await db.job_items.update_one(
@@ -470,14 +507,18 @@ async def compare_job_with_scraped_prices(job_id: str):
                 {"$set": {
                     "melhor_preco": best_price,
                     "melhor_fornecedor": best_supplier,
-                    "economia_euro": economia_euro,
-                    "economia_percent": economia_percent,
+                    "melhor_marca": best_marca,
+                    "match_type": match_type,
+                    "economia_euro": round(economia_euro, 2) if economia_euro else None,
+                    "economia_percent": round(economia_percent, 2) if economia_percent else None,
                     "supplier_prices": supplier_prices,
                     "status": "found" if economia_euro and economia_euro > 0 else "processed"
                 }}
             )
             
             updated_count += 1
+            if match_type in ["exact", "partial"]:
+                matched_count += 1
             if economia_euro and economia_euro > 0:
                 found_count += 1
                 total_savings += economia_euro
@@ -488,7 +529,8 @@ async def compare_job_with_scraped_prices(job_id: str):
         {"$set": {
             "processed_items": updated_count,
             "found_items": found_count,
-            "total_savings": total_savings,
+            "matched_items": matched_count,
+            "total_savings": round(total_savings, 2),
             "status": JobStatus.COMPLETED.value,
             "completed_at": datetime.now(timezone.utc).isoformat()
         }}
