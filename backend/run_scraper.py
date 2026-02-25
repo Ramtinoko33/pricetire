@@ -132,7 +132,7 @@ async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
     return await scrape_mp24_with_session(page, username, password, medida, already_logged_in=False)
 
 async def scrape_mp24_with_session(page, username: str, password: str, medida: str, already_logged_in: bool = False) -> dict:
-    """Scrape MP24 with session reuse support - extracts ALL products with brand/model"""
+    """Scrape MP24 with session reuse support - extracts ALL products with brand/model via API interception"""
     result = {
         "supplier": "MP24", 
         "price": None, 
@@ -140,6 +140,20 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
         "products": [],  # List of all products found
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+    
+    captured_tyres = []
+    
+    # Set up response handler to capture API data
+    async def handle_response(response):
+        try:
+            if '/api/frontend/v1/tyres?' in response.url and 'json' in response.headers.get('content-type', ''):
+                data = await response.json()
+                if isinstance(data, list):
+                    captured_tyres.extend(data)
+        except:
+            pass
+    
+    page.on('response', handle_response)
     
     try:
         if not already_logged_in:
@@ -173,7 +187,7 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
             print(f"  [MP24] Searching for: {medida_norm}")
             await asyncio.sleep(1)
             
-            # Find and click the submit button for this form (form id="matchcode")
+            # Find and click the submit button
             form = page.locator('#matchcode')
             submit_btn = form.locator('button[type="submit"]')
             
@@ -182,87 +196,50 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
             else:
                 await matchcode_input.press('Enter')
             
-            await asyncio.sleep(5)
+            # Wait for API response
+            await asyncio.sleep(8)
             await page.wait_for_load_state("networkidle")
             
-            # Extract ALL products with brand and model
-            print("  [MP24] Extracting products...")
-            products = await page.evaluate('''() => {
-                const products = [];
-                
-                // MP24 uses table rows for products
-                const rows = document.querySelectorAll('tr.article-row, tr[class*="article"], .article-item, .tyre-row');
-                
-                rows.forEach(row => {
-                    try {
-                        const text = row.textContent || '';
-                        
-                        // Extract brand - look for manufacturer name
-                        let brand = '';
-                        const brandEl = row.querySelector('.manufacturer, .brand, td:nth-child(2), [class*="brand"]');
-                        if (brandEl) {
-                            brand = brandEl.textContent.trim().split('\\n')[0].trim();
-                        }
-                        
-                        // Extract model/profile  
-                        let model = '';
-                        const modelEl = row.querySelector('.profile, .model, .description, td:nth-child(3)');
-                        if (modelEl) {
-                            model = modelEl.textContent.trim().split('\\n')[0].trim();
-                        }
-                        
-                        // Try to get brand from text if not found
-                        if (!brand) {
-                            const knownBrands = ['MICHELIN', 'BRIDGESTONE', 'GOODYEAR', 'CONTINENTAL', 'PIRELLI', 
-                                                'DUNLOP', 'HANKOOK', 'YOKOHAMA', 'FIRESTONE', 'FALKEN',
-                                                'KUMHO', 'NEXEN', 'TOYO', 'NOKIAN', 'VREDESTEIN', 'COOPER',
-                                                'BF GOODRICH', 'UNIROYAL', 'SEMPERIT', 'BARUM', 'MATADOR',
-                                                'LAUFENN', 'ROADSTONE', 'MAXXIS', 'NANKANG', 'TRISTAR'];
-                            const textUpper = text.toUpperCase();
-                            for (const b of knownBrands) {
-                                if (textUpper.includes(b)) {
-                                    brand = b;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        // Extract price
-                        let price = null;
-                        const priceMatches = text.match(/€?\s*(\d+)[,\.](\d{2})\s*€?/g);
-                        if (priceMatches) {
-                            for (const pm of priceMatches) {
-                                const cleanPrice = pm.replace('€', '').trim().replace(',', '.');
-                                const p = parseFloat(cleanPrice);
-                                if (p > 15 && p < 500) {
-                                    price = p;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (price && brand) {
-                            products.push({ 
-                                brand: brand.toUpperCase(), 
-                                model: model, 
-                                price: price 
-                            });
-                        }
-                    } catch (e) {}
-                });
-                
-                return products;
-            }''')
+            # Process captured API data
+            print(f"  [MP24] Captured {len(captured_tyres)} tyres from API")
             
-            if products and len(products) > 0:
-                result["products"] = products
-                # Also set best price for backwards compatibility
-                prices = [p['price'] for p in products]
-                result["price"] = min(prices)
-                result["all_prices"] = sorted(prices)[:10]
-                print(f"  [MP24] Found {len(products)} products with brand/model")
-                for p in products[:3]:
-                    print(f"    - {p['brand']} {p['model']}: €{p['price']}")
+            if captured_tyres:
+                products = []
+                for tyre in captured_tyres:
+                    brand = tyre.get('manufacturer', '').upper()
+                    model = tyre.get('profile', '')
+                    
+                    # Get price from bestPricesBySource
+                    best_prices = tyre.get('bestPricesBySource', {})
+                    price = None
+                    
+                    # Try different price sources
+                    for source in ['supplier', 'loadAll', 'central_warehouse', 'my_stock']:
+                        source_data = best_prices.get(source, {})
+                        best_price = source_data.get('bestPrice', {})
+                        if best_price and best_price.get('purchasePrice'):
+                            price = best_price['purchasePrice']
+                            break
+                    
+                    if brand and price and price > 15 and price < 500:
+                        products.append({
+                            'brand': brand,
+                            'model': model,
+                            'price': price
+                        })
+                
+                if products:
+                    result["products"] = products
+                    prices = [p['price'] for p in products]
+                    result["price"] = min(prices)
+                    result["all_prices"] = sorted(prices)[:10]
+                    print(f"  [MP24] Extracted {len(products)} products with brand/model")
+                    
+                    # Show sample products
+                    for p in products[:5]:
+                        print(f"    - {p['brand']} {p['model']}: €{p['price']}")
+                else:
+                    result["error"] = "No valid products found in API response"
             else:
                 # Fallback to simple price extraction
                 content = await page.content()
@@ -270,15 +247,18 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
                 if prices:
                     result["price"] = min(prices)
                     result["all_prices"] = sorted(prices)[:10]
-                    print(f"  [MP24] Found {len(prices)} prices (no brand info), best: €{result['price']}")
+                    print(f"  [MP24] Fallback: Found {len(prices)} prices, best: €{result['price']}")
                 else:
-                    result["error"] = "No prices found in results"
+                    result["error"] = "No products found"
         else:
             result["error"] = "matchcodeField not found"
             
     except Exception as e:
         result["error"] = str(e)
         print(f"  [MP24] Error: {e}")
+    finally:
+        # Remove the response handler
+        page.remove_listener('response', handle_response)
     
     return result
 
