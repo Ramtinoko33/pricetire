@@ -154,6 +154,15 @@ const Suppliers = () => {
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => handleOpenSelectors(supplier)}
+                          title="Configurar Seletores CSS"
+                          data-testid={`selectors-btn-${supplier.id}`}
+                        >
+                          <Code size={14} />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleTestLogin(supplier.id, supplier.name)}
                           disabled={testingId === supplier.id}
                           data-testid={`test-login-btn-${supplier.id}`}
