@@ -59,6 +59,74 @@ def extract_prices(content: str) -> list:
 def normalize_medida(medida: str) -> str:
     return medida.replace('/', '').replace('R', '').replace('r', '')
 
+def normalize_brand(brand: str) -> str:
+    """Normalize brand name for comparison"""
+    if not brand:
+        return ""
+    brand = brand.strip().upper()
+    # Common variations
+    brand = brand.replace('GOODYEAR', 'GOODYEAR')
+    brand = brand.replace('GOOD YEAR', 'GOODYEAR')
+    return brand
+
+async def extract_products_from_page(page) -> list:
+    """Extract all products with brand, model and price from current page"""
+    products = []
+    
+    # Try to get products via JavaScript evaluation
+    try:
+        # Common product container selectors
+        product_data = await page.evaluate('''() => {
+            const products = [];
+            
+            // Try different selectors for product rows/cards
+            const selectors = [
+                '.product-row', '.article-row', '.product-item', 
+                'tr[data-article]', '.tyre-item', '[class*="product"]',
+                '.article', '.item-row'
+            ];
+            
+            for (const selector of selectors) {
+                const items = document.querySelectorAll(selector);
+                if (items.length > 0) {
+                    items.forEach(item => {
+                        const text = item.textContent || '';
+                        
+                        // Extract brand - usually in bold or specific class
+                        let brand = '';
+                        const brandEl = item.querySelector('.brand, .manufacturer, [class*="brand"], strong, b');
+                        if (brandEl) brand = brandEl.textContent.trim();
+                        
+                        // Extract model/profile
+                        let model = '';
+                        const modelEl = item.querySelector('.model, .profile, .description, [class*="model"]');
+                        if (modelEl) model = modelEl.textContent.trim();
+                        
+                        // Extract price
+                        let price = null;
+                        const priceMatch = text.match(/€?\s*(\d+[,\.]\d{2})\s*€?/);
+                        if (priceMatch) {
+                            price = parseFloat(priceMatch[1].replace(',', '.'));
+                        }
+                        
+                        if (price && price > 15 && price < 500) {
+                            products.push({ brand, model, price, text: text.substring(0, 200) });
+                        }
+                    });
+                    break;
+                }
+            }
+            
+            return products;
+        }''')
+        
+        if product_data:
+            products = product_data
+    except Exception as e:
+        print(f"  Error extracting products via JS: {e}")
+    
+    return products
+
 async def scrape_mp24(page, username: str, password: str, medida: str) -> dict:
     """Scrape MP24 (always does full login)"""
     return await scrape_mp24_with_session(page, username, password, medida, already_logged_in=False)
