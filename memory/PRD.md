@@ -11,7 +11,7 @@ O utilizador pretende criar uma aplicação para pesquisar automaticamente os pr
 ## Arquitetura Implementada
 
 ### Backend (FastAPI + MongoDB)
-- **server.py**: API REST com endpoints para suppliers, jobs, scraping
+- **server.py**: API REST com endpoints para suppliers, jobs, scraping, comparação
 - **worker.py**: Processo independente que executa jobs de scraping
 - **run_scraper.py**: Lógica de scraping com Playwright
 
@@ -19,8 +19,9 @@ O utilizador pretende criar uma aplicação para pesquisar automaticamente os pr
 - Dashboard com estatísticas
 - Gestão de fornecedores
 - Upload de ficheiros Excel
-- Página de resultados
+- Página de resultados com botão "Comparar Preços"
 - **Página Scraper**: Interface para scraping manual
+- **Modal Seletores CSS**: Configuração de seletores por fornecedor
 
 ### Scraping Architecture (Worker Desacoplado)
 O scraping usa um sistema de worker desacoplado para contornar proteções anti-bot:
@@ -28,62 +29,71 @@ O scraping usa um sistema de worker desacoplado para contornar proteções anti-
 2. `worker.py` processa jobs em background
 3. Resultados guardados em `scraped_prices` collection
 
-## O Que Foi Implementado (24/02/2026)
+## O Que Foi Implementado
 
-### P0 - Arquitetura Worker (COMPLETO)
-- [x] Endpoint `/api/scrape/enqueue` para criar jobs
-- [x] `worker.py` com sistema de locks por fornecedor
-- [x] `run_scraper.py` com função `run_supplier()`
-- [x] Reutilização de sessão de login para múltiplas medidas
-- [x] Armazenamento de `password_raw` para credenciais não hashadas
+### Sessão 24/02/2026
+- [x] Arquitetura Worker desacoplado (P0)
+- [x] Scrapers funcionais: MP24, Prismanil, Dispnal
+- [x] Página Scraper no frontend
+- [x] Fix `/api/jobs` para filtrar scrape jobs
 
-### P1 - Scrapers Funcionais (PARCIAL)
-- [x] **MP24**: Funcional com matchcode search
+### Sessão 25/02/2026
+- [x] **Integração scraped_prices com job_items**
+  - Endpoint `/api/jobs/{id}/compare` compara preços scraped com job items
+  - Calcula economia por item e total
+  - Botão "Comparar Preços" na página de Resultados
+  
+- [x] **Configuração de Seletores CSS na UI**
+  - Endpoints `/api/suppliers/{id}/selectors` GET/PUT
+  - Modal de edição com campos:
+    - Seletor Username/Password
+    - Seletor Botão Login
+    - Seletor Campo/Botão Pesquisa
+    - Padrão de Preço (Regex)
+    - Notas
+  - Botão `</>` na lista de fornecedores
+
+### Scrapers
+- [x] **MP24**: Funcional (matchcode search)
 - [x] **Prismanil**: Funcional
 - [x] **Dispnal**: Funcional
-- [ ] **S. José Pneus**: Login não funciona (credenciais ou site mudou)
-- [ ] **Euromais**: Site não responde (timeout)
-
-### Frontend
-- [x] Página Scraper mostra preços obtidos
-- [x] Agrupamento por medida
-- [x] Indicador de "Melhor" preço
-- [x] Botão refresh funcional
-
-### Bug Fixes
-- [x] Corrigido `/api/jobs` para filtrar jobs de scrape queue
-- [x] Corrigido paths da API no frontend (removido `/api/` duplicado)
+- [ ] **S. José Pneus**: Login não funciona
+- [ ] **Euromais**: Site não responde
 
 ## Base de Dados
 
 ### Collections
-- `suppliers`: Fornecedores com credenciais
-- `jobs`: Jobs de upload Excel (type undefined) + jobs de scrape (type: "scrape")
-- `job_items`: Items de cada job de upload
+- `suppliers`: Fornecedores com credenciais e seletores
+- `jobs`: Jobs de upload Excel
+- `job_items`: Items de cada job com economia calculada
 - `scraped_prices`: Preços obtidos pelo scraper
-- `locks`: Locks por fornecedor para evitar scraping concorrente
+- `locks`: Locks por fornecedor
 
-### Campos password_raw
-Os fornecedores têm `password` (hashada) e `password_raw` (texto claro para scraping):
-- S. José: 5010600251
-- euromais: 5010600251
-- MP24: Sl6dBhGf
-- Prismanil: dompedro4785
-- Dispnal: 501060251
+### Schema suppliers.selectors
+```json
+{
+  "login_username": "#username",
+  "login_password": "#password",
+  "login_button": "button[type='submit']",
+  "search_input": "#searchBox",
+  "search_button": "#searchBtn",
+  "price_pattern": "€\\s*(\\d+[,.]\\d{2})",
+  "notes": "Notas sobre o scraping"
+}
+```
 
 ## Backlog
 
 ### P1 (Prioritário)
 - [ ] Corrigir scraper S. José (investigar login)
 - [ ] Corrigir scraper Euromais (verificar URL/credenciais)
+- [ ] Usar seletores dinâmicos no run_scraper.py
 
 ### P2 (Melhorias)
 - [ ] Barra de progresso real-time na UI
-- [ ] Integrar scraped_prices com job_items
-- [ ] Configurar cronjob para worker
-- [ ] Exportação melhorada para Excel
+- [ ] Cronjob para worker automático
+- [ ] Histórico de preços
 
 ### P3 (Futuro)
-- [ ] Configuração de seletores CSS por fornecedor na UI
 - [ ] Adicionar mais fornecedores
-- [ ] Histórico de preços
+- [ ] Alertas de preço
