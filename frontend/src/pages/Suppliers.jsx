@@ -91,6 +91,11 @@ const Suppliers = () => {
     }
   };
 
+  const handleOpenSelectors = (supplier) => {
+    setSelectedSupplier(supplier);
+    setSelectorsOpen(true);
+  };
+
   if (loading) {
     return <div className="text-center py-12" data-testid="loading">A carregar...</div>;
   }
