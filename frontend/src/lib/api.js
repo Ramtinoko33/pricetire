@@ -16,6 +16,8 @@ export const suppliersAPI = {
   update: (id, data) => api.put(`/suppliers/${id}`, data),
   delete: (id) => api.delete(`/suppliers/${id}`),
   testLogin: (id) => api.post(`/suppliers/${id}/test`),
+  getSelectors: (id) => api.get(`/suppliers/${id}/selectors`),
+  updateSelectors: (id, selectors) => api.put(`/suppliers/${id}/selectors`, selectors),
 };
 
 export const jobsAPI = {
@@ -25,6 +27,7 @@ export const jobsAPI = {
   getAll: () => api.get('/jobs'),
   getOne: (id) => api.get(`/jobs/${id}`),
   run: (id) => api.post(`/jobs/${id}/run`),
+  compare: (id) => api.post(`/jobs/${id}/compare`),
   getProgress: (id) => api.get(`/jobs/${id}/progress`),
   getResults: (id) => api.get(`/jobs/${id}/results`),
   export: (id) => api.get(`/jobs/${id}/export`, { responseType: 'blob' }),
