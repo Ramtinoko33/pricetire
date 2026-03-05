@@ -263,15 +263,23 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
     return result
 
 async def scrape_prismanil(page, username: str, password: str, medida: str) -> dict:
-    """Scrape Prismanil"""
-    result = {"supplier": "Prismanil", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
+    """Scrape Prismanil - extracts ALL products with brand/model"""
+    result = {
+        "supplier": "Prismanil", 
+        "price": None, 
+        "error": None, 
+        "products": [],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
     
     try:
+        print("  [Prismanil] Navigating...")
         await page.goto("https://www.prismanil.pt/b2b/pesquisa", wait_until="networkidle", timeout=60000)
         await asyncio.sleep(2)
         
         content = await page.content()
         if "txtPesquisa" not in content:
+            print("  [Prismanil] Logging in...")
             username_input = page.locator('input[type="text"]').first
             if await username_input.count() > 0:
                 await username_input.fill(username)
@@ -289,6 +297,7 @@ async def scrape_prismanil(page, username: str, password: str, medida: str) -> d
         
         search_input = page.locator('#txtPesquisa')
         if await search_input.count() > 0:
+            print(f"  [Prismanil] Searching for: {medida_norm}")
             await search_input.fill(medida_norm)
             await asyncio.sleep(1)
             
@@ -297,28 +306,80 @@ async def scrape_prismanil(page, username: str, password: str, medida: str) -> d
                 await search_btn.click()
             await asyncio.sleep(5)
             
-            content = await page.content()
-            prices = extract_prices(content)
-            if prices:
+            # Extract products from data-* attributes
+            print("  [Prismanil] Extracting products...")
+            products = await page.evaluate('''() => {
+                const products = [];
+                const items = document.querySelectorAll('[data-produto][data-preco]');
+                
+                items.forEach(item => {
+                    const produtoStr = item.getAttribute('data-produto') || '';
+                    const precoStr = item.getAttribute('data-preco') || '';
+                    
+                    if (produtoStr && precoStr) {
+                        // Parse produto string: "BRIDGESTONE 205/55R16 EP150 91V"
+                        const parts = produtoStr.trim().split(' ');
+                        const brand = parts[0] || '';
+                        const model = parts.slice(2).join(' ') || '';
+                        
+                        const price = parseFloat(precoStr.replace(',', '.'));
+                        
+                        if (brand && price > 15 && price < 500) {
+                            products.push({
+                                brand: brand.toUpperCase(),
+                                model: model,
+                                price: price
+                            });
+                        }
+                    }
+                });
+                
+                return products;
+            }''')
+            
+            if products and len(products) > 0:
+                result["products"] = products
+                prices = [p['price'] for p in products]
                 result["price"] = min(prices)
                 result["all_prices"] = sorted(prices)[:10]
+                print(f"  [Prismanil] Found {len(products)} products with brand/model")
+                for p in products[:3]:
+                    print(f"    - {p['brand']} {p['model']}: €{p['price']}")
+            else:
+                # Fallback to simple price extraction
+                content = await page.content()
+                prices = extract_prices(content)
+                if prices:
+                    result["price"] = min(prices)
+                    result["all_prices"] = sorted(prices)[:10]
+                else:
+                    result["error"] = "No products found"
         else:
             result["error"] = "Search field not found"
     except Exception as e:
         result["error"] = str(e)
+        print(f"  [Prismanil] Error: {e}")
     
     return result
 
 async def scrape_dispnal(page, username: str, password: str, medida: str) -> dict:
-    """Scrape Dispnal"""
-    result = {"supplier": "Dispnal", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
+    """Scrape Dispnal - extracts ALL products with brand/model"""
+    result = {
+        "supplier": "Dispnal", 
+        "price": None, 
+        "error": None, 
+        "products": [],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
     
     try:
+        print("  [Dispnal] Navigating...")
         await page.goto("https://dispnal.pt/home/homepage", wait_until="networkidle", timeout=60000)
         await asyncio.sleep(3)
         
         content = await page.content()
         if 'Entrar' in content or 'Login' in content:
+            print("  [Dispnal] Logging in...")
             login_link = page.locator('a:has-text("Entrar"), a:has-text("Login")')
             if await login_link.count() > 0:
                 await login_link.first.click()
@@ -341,6 +402,7 @@ async def scrape_dispnal(page, username: str, password: str, medida: str) -> dic
         
         medida_input = page.locator('#medida-normal')
         if await medida_input.count() > 0:
+            print(f"  [Dispnal] Searching for: {medida_norm}")
             await medida_input.fill(medida_norm)
             await asyncio.sleep(1)
             
@@ -349,15 +411,70 @@ async def scrape_dispnal(page, username: str, password: str, medida: str) -> dic
                 await search_btn.click()
             await asyncio.sleep(5)
             
-            content = await page.content()
-            prices = extract_prices(content)
-            if prices:
+            # Extract products
+            print("  [Dispnal] Extracting products...")
+            products = await page.evaluate('''() => {
+                const products = [];
+                const rows = document.querySelectorAll('.prod-list-row[data-price]');
+                
+                rows.forEach(row => {
+                    const priceStr = row.getAttribute('data-price') || '';
+                    const price = parseFloat(priceStr);
+                    
+                    // Get brand from image alt attribute
+                    const brandImg = row.querySelector('.prod-list-brand-wrapper img');
+                    const brand = brandImg ? (brandImg.getAttribute('alt') || '') : '';
+                    
+                    // Get model from description
+                    const nameCell = row.querySelector('.cell-name');
+                    let model = '';
+                    if (nameCell) {
+                        // Look for model text after brand
+                        const descText = nameCell.textContent || '';
+                        const lines = descText.split('\\n').map(l => l.trim()).filter(l => l);
+                        // Model is usually the second non-empty line or contains pattern like "PRIMACY"
+                        for (const line of lines) {
+                            if (line.length > 3 && !line.includes(brand) && !line.includes('€')) {
+                                model = line;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (brand && price > 15 && price < 500) {
+                        products.push({
+                            brand: brand.toUpperCase(),
+                            model: model,
+                            price: price
+                        });
+                    }
+                });
+                
+                return products;
+            }''')
+            
+            if products and len(products) > 0:
+                result["products"] = products
+                prices = [p['price'] for p in products]
                 result["price"] = min(prices)
                 result["all_prices"] = sorted(prices)[:10]
+                print(f"  [Dispnal] Found {len(products)} products with brand/model")
+                for p in products[:3]:
+                    print(f"    - {p['brand']} {p['model']}: €{p['price']}")
+            else:
+                # Fallback to simple price extraction
+                content = await page.content()
+                prices = extract_prices(content)
+                if prices:
+                    result["price"] = min(prices)
+                    result["all_prices"] = sorted(prices)[:10]
+                else:
+                    result["error"] = "No products found"
         else:
             result["error"] = "Search field not found"
     except Exception as e:
         result["error"] = str(e)
+        print(f"  [Dispnal] Error: {e}")
     
     return result
 
