@@ -42,4 +42,13 @@ export const logsAPI = {
   getAll: (jobId = null, limit = 100) => api.get('/logs', { params: { job_id: jobId, limit } }),
 };
 
+export const scrapedPricesAPI = {
+  getAll: (medida = null) => api.get('/scraped-prices', { params: medida ? { medida } : {} }),
+  getBest: (medida) => api.get(`/scraped-prices/best/${medida}`),
+};
+
+export const scrapeAPI = {
+  enqueue: (supplier_id, sizes) => api.post('/scrape/enqueue', { supplier_id, sizes }),
+};
+
 export default api;

@@ -705,14 +705,14 @@ async def get_scraper_status():
     return scraper_status
 
 @api_router.get("/scraped-prices")
-async def get_scraped_prices(medida: str = None):
+async def get_scraped_prices(medida: str = None, limit: int = 1000):
     """Get scraped prices from database"""
     query = {}
     if medida:
-        medida_norm = medida.replace("/", "").replace("R", "")
+        medida_norm = medida.replace("/", "").replace("R", "").replace("r", "")
         query["medida"] = {"$regex": medida_norm, "$options": "i"}
     
-    prices = await db.scraped_prices.find(query, {"_id": 0}).sort("scraped_at", -1).to_list(100)
+    prices = await db.scraped_prices.find(query, {"_id": 0}).sort("price", 1).to_list(limit)
     return prices
 
 @api_router.get("/scraped-prices/best/{medida}")
