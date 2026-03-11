@@ -10,7 +10,10 @@ load_dotenv()
 
 print("=== IMPORTS OK ===", flush=True)
 
-MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+MONGO_URL = os.environ.get(
+    'MONGO_URL',
+    'mongodb://mongo:xaqYuAhAqswTyVYfYwkDrIlhTHBQVPxh@mongodb.railway.internal:27017'
+)
 DB_NAME = os.environ.get('DB_NAME', 'test_database')
 
 print(f"=== MONGO_URL: {MONGO_URL[:50]}... ===", flush=True)
@@ -24,6 +27,8 @@ try:
     db = client[DB_NAME]
     print("=== MONGODB CONNECTED OK ===", flush=True)
 except Exception as e:
+    print("=== FAILED TO CONNECT TO MONGODB ===", flush=True)
+    print(f"=== MONGODB URL (masked): {MONGO_URL[:50]}... ===", flush=True)
     print(f"=== MONGODB ERROR: {e} ===", flush=True)
     sys.exit(1)
 
