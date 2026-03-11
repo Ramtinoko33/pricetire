@@ -52,6 +52,7 @@ async def get_suppliers():
 @api_router.post("/suppliers", response_model=Supplier)
 async def create_supplier(supplier_data: SupplierCreate):
     supplier_dict = supplier_data.model_dump()
+    supplier_dict['password_raw'] = supplier_dict['password']  # Store plain text for scraping
     supplier_dict['password'] = pwd_context.hash(supplier_dict['password'])
     supplier_dict['id'] = str(uuid.uuid4())
     supplier_dict['is_active'] = True
@@ -61,6 +62,7 @@ async def create_supplier(supplier_data: SupplierCreate):
     
     await db.suppliers.insert_one(supplier_dict)
     supplier_dict['password'] = "********"
+    supplier_dict.pop('password_raw', None)  # Don't return password_raw in response
     return Supplier(**supplier_dict)
 
 @api_router.put("/suppliers/{supplier_id}", response_model=Supplier)

@@ -1,98 +1,107 @@
 # Pneu Price Scout - PRD
 
 ## Problema Original
-O utilizador pretende criar uma aplicação para pesquisar automaticamente os preços de pneus nos websites B2B dos seus fornecedores.
+Aplicação para pesquisar automaticamente preços de pneus nos websites B2B dos fornecedores.
 
-### Requisitos Principais
-1. **Entrada**: Carregar ficheiro Excel com detalhes dos pneus (marca, medida, modelo) e o preço de custo atual
-2. **Processo**: Iniciar sessão nos websites de múltiplos fornecedores, procurar os pneus listados e comparar preços
-3. **Saída**: Identificar se algum fornecedor oferece preço mais baixo e gerar relatório com o fornecedor e a poupança
+## Estado Atual: FUNCIONAL ✅
 
-## O Que Foi Implementado
+### Pipeline End-to-End Testado
+1. **POST /api/scrape/enqueue** → Cria job na coleção `jobs`
+2. **worker.py** → Lê jobs, adquire lock, chama `run_scraper.py`
+3. **run_scraper.py** → Scraping com Playwright, guarda em `scraped_prices`
 
-### Sessão 25/02/2026 - FINAL
+### Fixes Aplicados (11/03/2026)
 
-#### 1. Scrapers Actualizados com Extração de Marca/Modelo
-- **MP24**: Usa API interception para extrair todos os produtos (~800 por medida)
-- **Prismanil**: Extrai de atributos `data-produto` e `data-preco` (~30-50 por medida)
-- **Dispnal**: Extrai de `.prod-list-row` e `.prod-list-brand-wrapper img[alt]` (~20-50 por medida)
+#### FIX 1: password_raw no create_supplier
+- Adicionado `password_raw` antes do hash no `server.py`
+- Script `fix_passwords.py` atualizou fornecedores existentes
 
-#### 2. Scraping Completo de Todas as Medidas do Excel
-Medidas scrapedas: 1955516, 1956515, 2055516, 2056016, 2155517, 2254018, 2254517, 2354518, 2454019, 2553519
+#### FIX 2: MONGO_URL no worker.py
+- Removido fallback hardcoded para Railway
+- Worker agora usa `.env` obrigatoriamente
 
-**Total: 1111 produtos com marca/modelo**
-- MP24: 886 produtos
-- Prismanil: 122 produtos  
-- Dispnal: 101 produtos
+#### FIX 3: .env no run_scraper.py
+- Adicionado `load_dotenv(Path('/app/backend/.env'))`
+- Scraper consegue conectar ao MongoDB corretamente
 
-#### 3. Comparação por MEDIDA + MARCA
-- **100% match exacto** - todos os 30 items do Excel encontraram correspondência exacta
-- **€1063.77 de economia total** identificada
-- **25 items com preço mais baixo** nos fornecedores
+### Resultado do Teste
+```
+=== WORKER STARTING ===
+=== IMPORTS OK ===
+=== MONGODB CONNECTED OK ===
+Worker started at 2026-03-11
 
-### Arquitectura Final
+[MP24] Captured 833 tyres from API
+[MP24] Extracted 742 products with brand/model
+  Saved 742 products with brand/model
+  Job completed successfully
+```
+
+### Dados na Base de Dados
+- **1113 preços** scraped
+- **1106 com marca/modelo**
+- **3 fornecedores** funcionais: MP24, Prismanil, Dispnal
+
+## Arquitetura
 
 ```
 /app/backend/
-├── server.py          # API REST FastAPI
+├── server.py          # FastAPI API
 ├── worker.py          # Processo de scraping em background
-├── run_scraper.py     # Lógica de scraping com extração de marca/modelo
-│   ├── scrape_mp24()       # API interception
-│   ├── scrape_prismanil()  # data-* attributes
-│   └── scrape_dispnal()    # DOM extraction
-
-/app/frontend/
-├── pages/
-│   ├── Results.jsx    # Comparação e economia
-│   ├── Suppliers.jsx  # Gestão + Seletores CSS
-│   └── Scraper.jsx    # Interface de scraping manual
+├── run_scraper.py     # Lógica de scraping com Playwright
+├── fix_passwords.py   # Script para atualizar passwords
+└── .env               # Credenciais MongoDB
 ```
 
-### Schema scraped_prices
-```json
-{
-  "supplier_name": "MP24",
-  "medida": "2055516",
-  "marca": "MICHELIN",
-  "modelo": "PRIMACY 4",
-  "price": 67.75,
-  "scraped_at": "2026-02-25T00:00:00Z"
-}
+### Fornecedores Configurados
+| Nome | Username | Status |
+|------|----------|--------|
+| MP24 | PTO02101 | ✅ Funcional |
+| Prismanil | dpedrov287 | ✅ Funcional |
+| Dispnal | geral@pneusdpedrov.com | ✅ Funcional |
+| S. José | 5010600251 | ❌ Login falha |
+| Euromais | 5010600251 | ❌ Timeout |
+
+## Como Usar
+
+### Criar Job de Scraping
+```bash
+curl -X POST http://localhost:8000/api/scrape/enqueue \
+  -H "Content-Type: application/json" \
+  -d '{"supplier_id": "mp24", "sizes": ["2055516"]}'
 ```
 
-### Schema job_items (após comparação)
-```json
-{
-  "medida": "2055516",
-  "marca": "Michelin",
-  "meu_preco": 118.21,
-  "melhor_preco": 97.76,
-  "melhor_fornecedor": "MP24",
-  "melhor_marca": "MICHELIN",
-  "match_type": "exact",
-  "economia_euro": 20.45,
-  "economia_percent": 17.3
-}
+### Executar Worker
+```bash
+cd /app/backend && python3 worker.py
 ```
 
-## Resultados Demonstrados
-- Upload de Excel com 30 pneus
-- Scraping de 3 fornecedores (MP24, Prismanil, Dispnal)
-- 1111 produtos extraídos com marca/modelo
-- 100% de matches exactos na comparação
-- €1063.77 de economia potencial identificada
+### Verificar Resultados
+```python
+from pymongo import MongoClient
+client = MongoClient(os.environ['MONGO_URL'])
+db = client['test_database']
+
+# Jobs
+for job in db.jobs.find({'type': 'scrape'}):
+    print(job['status'], job['supplier_id'])
+
+# Preços
+for p in db.scraped_prices.find().limit(10):
+    print(p['supplier_name'], p['medida'], p['marca'], p['price'])
+```
 
 ## Backlog
 
-### P1 (Prioritário)
-- [ ] Corrigir scrapers S. José e Euromais
+### P1 - Prioritário
+- [ ] Corrigir S. José (investigar login)
+- [ ] Corrigir Euromais (timeout)
 
-### P2 (Melhorias)
-- [ ] Cronjob para scraping periódico automático
-- [ ] Barra de progresso real-time
-- [ ] Usar seletores CSS configurados na UI
+### P2 - Melhorias
+- [ ] Cronjob para worker automático
+- [ ] Barra de progresso na UI
+- [ ] Usar seletores CSS configurados
 
-### P3 (Futuro)
-- [ ] Adicionar mais fornecedores
+### P3 - Futuro
 - [ ] Histórico de preços
-- [ ] Alertas de variação de preço
+- [ ] Alertas de variação

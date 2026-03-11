@@ -10,18 +10,39 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
+
+print("=== WORKER STARTING ===", flush=True)
+
+# Load environment from .env file
+from dotenv import load_dotenv
+load_dotenv(Path('/app/backend/.env'))
+
+print("=== IMPORTS OK ===", flush=True)
+
+MONGO_URL = os.environ.get('MONGO_URL')
+if not MONGO_URL:
+    print("ERROR: MONGO_URL not set in environment!", flush=True)
+    sys.exit(1)
+
+DB_NAME = os.environ.get('DB_NAME')
+if not DB_NAME:
+    print("ERROR: DB_NAME not set in environment!", flush=True)
+    sys.exit(1)
+
 from pymongo import MongoClient, ReturnDocument
 from bson import ObjectId
 
-# Load environment
-from dotenv import load_dotenv
-load_dotenv()
-
-MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-DB_NAME = os.environ.get('DB_NAME', 'test_database')
-
 client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
+
+# Test connection
+try:
+    db.command('ping')
+    print("=== MONGODB CONNECTED OK ===", flush=True)
+except Exception as e:
+    print(f"ERROR: MongoDB connection failed: {e}", flush=True)
+    sys.exit(1)
 
 def claim_job():
     """Claim the next queued job"""

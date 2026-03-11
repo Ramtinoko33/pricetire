@@ -16,6 +16,10 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Load environment from .env file FIRST
+from dotenv import load_dotenv
+load_dotenv(Path('/app/backend/.env'))
+
 # Setup environment
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
 sys.path.insert(0, '/app/backend')
@@ -24,9 +28,13 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from playwright.async_api import async_playwright
 import re
 
-# MongoDB connection
-MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-DB_NAME = os.environ.get('DB_NAME', 'test_database')
+# MongoDB connection - get from environment
+MONGO_URL = os.environ.get('MONGO_URL')
+DB_NAME = os.environ.get('DB_NAME')
+
+if not MONGO_URL or not DB_NAME:
+    print(f"ERROR: Missing MongoDB config. MONGO_URL={MONGO_URL}, DB_NAME={DB_NAME}")
+    sys.exit(1)
 
 # Results directory
 RESULTS_DIR = Path('/app/tmp/scraper_results')
