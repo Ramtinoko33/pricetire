@@ -9,6 +9,7 @@ import Results from './pages/Results';
 import Logs from './pages/Logs';
 import Scraper from './pages/Scraper';
 import Precos from './pages/Precos';
+import Comparar from './pages/Comparar';
 import '@/App.css';
 
 function App() {
@@ -19,8 +20,9 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/upload" element={<Upload />} />
           <Route path="/suppliers" element={<Suppliers />} />
-          <Route path="/results" element={<Results />} />
+          <Route path="/comparar" element={<Comparar />} />
           <Route path="/precos" element={<Precos />} />
+          <Route path="/results" element={<Results />} />
           <Route path="/scraper" element={<Scraper />} />
           <Route path="/logs" element={<Logs />} />
         </Routes>
