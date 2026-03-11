@@ -10,6 +10,17 @@ import sys
 print("=== WORKER STARTING ===", flush=True)
 sys.stdout.flush()
 import os
+print("=== OS imported ===", flush=True)
+import time
+print("=== TIME imported ===", flush=True)
+from datetime import datetime, timedelta
+print("=== DATETIME imported ===", flush=True)
+from pymongo import MongoClient, ReturnDocument
+print("=== PYMONGO imported ===", flush=True)
+from bson import ObjectId
+print("=== BSON imported ===", flush=True)
+from dotenv import load_dotenv
+print("=== DOTENV imported ===", flush=True)
 import sys
 import time
 from datetime import datetime, timedelta
