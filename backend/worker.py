@@ -6,6 +6,9 @@ Runs independently from the FastAPI server.
 Usage:
     python3 worker.py
 """
+import sys
+print("=== WORKER STARTING ===", flush=True)
+sys.stdout.flush()
 import os
 import sys
 import time
