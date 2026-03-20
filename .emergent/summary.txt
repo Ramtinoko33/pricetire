@@ -1,170 +1,156 @@
 <analysis>**original_problem_statement:**
-O utilizador pretende criar uma aplicação para pesquisar automaticamente os preços de pneus nos websites B2B dos seus fornecedores. O fluxo de trabalho é o seguinte:
+O utilizador pretende criar uma aplicação para pesquisar automaticamente os preços de pneus nos websites B2B dos seus fornecedores.
 1.  **Entrada**: Carregar um ficheiro Excel com detalhes dos pneus (marca, medida, modelo) e o preço de custo atual do utilizador.
-2.  **Processo**: A aplicação deve iniciar sessão nos websites de múltiplos fornecedores (5 a 15), procurar os pneus listados e comparar os preços.
+2.  **Processo**: A aplicação deve iniciar sessão nos websites de múltiplos fornecedores, procurar os pneus listados e comparar os preços.
 3.  **Saída**: A aplicação deve identificar se algum fornecedor oferece um preço mais baixo e gerar um relatório indicando qual o fornecedor e qual a poupança.
-4.  **Requisitos do Produto (PRD) com base no prompt otimizado do utilizador**:
+4.  **Requisitos do Produto (PRD)**:
     *   **Nome da App**: Pneu Price Scout – MVP 5 Fornecedores.
-    *   **Upload**: Ficheiro Excel com , , , , , . Campos de  e  no upload.
-    *   **Regras de Negócio**: Match rigoroso de produtos, alertas de preço apenas acima dos thresholds, marcar itens não encontrados.
-    *   **Fornecedores**: Gestão de fornecedores com nome, URLs (login/pesquisa), e credenciais seguras. Botão Test Login.
-    *   **Resultados**: Tabela de resultados com , , ,  e colunas de preço para cada fornecedor. Exportação para Excel.
-    *   **Arquitetura**: Módulo de scraping em Python () com Playwright, usando um padrão de adapter para cada fornecedor. Sem serviços externos pagos.
+    *   **Upload**: Ficheiro Excel com , , , , , .
+    *   **Fornecedores**: Gestão de fornecedores com nome, URLs, e credenciais seguras.
+    *   **Resultados**: Tabela de resultados com , , , . Exportação para Excel.
+    *   **Arquitetura**: Módulo de scraping em Python com Playwright, utilizando uma arquitetura de worker desacoplado.
 
 **User's preferred language**: Portuguese
 
 **what currently exists?**
-Foi construída uma aplicação full-stack com um frontend em React e um backend em FastAPI.
-*   **Frontend**: Inclui um dashboard com páginas para Upload, Resultados, Fornecedores e Logs. A interface permite o upload de ficheiros Excel, a gestão de fornecedores (adicionar/editar com credenciais encriptadas) e a visualização do estado dos trabalhos de scraping. Foi adicionada uma funcionalidade para apagar trabalhos concluídos.
-*   **Backend**: Um servidor FastAPI com endpoints para gerir fornecedores, trabalhos e visualizar resultados/logs. O núcleo da lógica de scraping está no ficheiro , que utiliza um padrão de adapter para lidar com a lógica específica de cada site. Foram criados adapters para quatro fornecedores: S. José, Euromais, Marketplace e Prismanil. Inicialmente usava Playwright, mas devido a problemas de anti-bot, a estratégia mudou para a utilização da API do **ScrapingBee**.
+Uma aplicação full-stack (React/FastAPI/MongoDB) com uma arquitetura de scraping baseada em workers totalmente funcional. A lógica de scraping é executada num processo  separado, que processa jobs criados através da API.
+*   **Backend**: Endpoints para gerir fornecedores, iniciar scraping (), fazer upload de ficheiros Excel () e comparar os preços (). A lógica de scraping em  extrai marca, modelo e preço para os fornecedores funcionais.
+*   **Frontend**: A aplicação possui um dashboard com:
+    *   Uma página  para pesquisar e visualizar todos os preços recolhidos.
+    *   Uma página  para fazer o upload do Excel e ver os resultados da comparação.
+    *   Uma página  que permite editar os seletores CSS de cada scraper através de um modal.
+*   **Scrapers**: Os scrapers para **MP24**, **Prismanil** e **Dispnal** estão funcionais. Os scrapers para **S. José** e **Euromais** estão implementados mas falham.
 
 **Last working item**:
-- **Last item agent was working**: O agente estava a tentar implementar a funcionalidade de scraping para quatro fornecedores usando a API do ScrapingBee. A última ação foi adicionar dois novos fornecedores (Marketplace, Prismanil) e atualizar o método  no  para usar o  para todos eles.
-- **Status**: BLOCKED
-- **Agent Testing Done**: N
-- **Which testing method agent to use?**: backend testing agent
+- **Last item agent was working**: O agente estava a corrigir um bug crítico reportado pelo utilizador. A funcionalidade de comparação de preços estava a fazer a correspondência incorretamente, usando apenas a  (tamanho do pneu) e ignorando a . A correção envolveu modificar o endpoint  para garantir que a correspondência na base de dados  é feita usando tanto a  como a  (de forma case-insensitive), eliminando resultados incorretos.
+- **Status**: USER VERIFICATION PENDING
+- **Agent Testing Done**: Y
+- **Which testing method agent to use?**: Manual testing by user. O utilizador deve testar o fluxo na página  para confirmar que os resultados da comparação estão agora corretos.
 - **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
-- **Issue 1 (P0)**: O backend está a falhar no arranque devido a um erro de sintaxe no ficheiro .
-- **Issue 2 (P1)**: A funcionalidade de scraping falha em encontrar preços, mesmo com o ScrapingBee. Os trabalhos terminam com 0 itens encontrados.
-- **Issue 3 (P2)**: Instabilidade do ambiente Playwright após reinicializações do pod (problema recorrente de executável não encontrado).
+- **Issue 1**: Scrapers para S. José e Euromais não estão a funcionar. (P1)
 
 **Issues Detail**:
-- **Issue 1: Backend a falhar devido a erro de sintaxe**
-    - **Attempted fixes**: O agente tentou usar  várias vezes para corrigir um  sem o  correspondente, o que corrompeu o ficheiro.
+- **Issue 1: Scrapers para S. José e Euromais não estão a funcionar**
+    - **Attempted fixes**: O agente implementou os adaptadores para estes dois fornecedores em , mas os testes falharam. O login para S. José não funciona e a ligação para Euromais resulta em timeout.
     - **Next debug checklist**:
-        1.  Visualizar  para confirmar o erro.
-        2.  Usar  com precisão para remover o bloco  incorreto.
-        3.  Validar a sintaxe do ficheiro com  antes de reiniciar.
-        4.  Reiniciar o backend: backend: stopped
-backend: started.
-        5.  Verificar os logs do supervisor: ==> /var/log/supervisor/backend.err.log <==
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [75]
-INFO:     Stopping reloader process [46]
-INFO:     Will watch for changes in these directories: ['/app/backend']
-INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-INFO:     Started reloader process [185] using WatchFiles
-python-dotenv could not parse statement starting at line 3
-INFO:     Started server process [187]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-
-==> /var/log/supervisor/backend.out.log <==.
-    - **Why fix this issue and what will be achieved with the fix?**: A aplicação está completamente inoperacional. O backend precisa de estar a funcionar para se poder depurar o problema principal do scraping.
-    - **Status**: IN PROGRESS
+        1.  Executar os scrapers em modo  ( no Playwright) para observar visualmente o processo de login e identificar o ponto de falha (ex: CAPTCHA, mudança de layout, credenciais inválidas).
+        2.  Verificar as credenciais fornecidas no resumo.
+        3.  Analisar o tráfego de rede durante o login para ver se o site espera pedidos adicionais.
+        4.  Se necessário, pedir ao utilizador para confirmar se os URLs de login e as credenciais ainda são válidos.
+    - **Why fix this issue and what will be achieved with the fix?**: Aumentará a cobertura de fornecedores, tornando a aplicação mais útil e encontrando potencialmente mais oportunidades de poupança.
+    - **Status**: NOT STARTED
     - **Is recurring issue?**: Y
-    - **Should Test frontend/backend/both after fix?**: Backend
+    - **Should Test backend/both after fix?**: Backend
     - **Blocked on other issue**: Não.
 
-- **Issue 2: Scraping falha a encontrar preços**
-    - **Attempted fixes**:
-        1.  Mudança de Playwright direto para a API do ScrapingBee.
-        2.  Adição de parâmetros como .
-        3.  Implementação de um  no ScrapingBee para automatizar o login. Este cenário é genérico e parece não estar a funcionar para os sites específicos.
-    - **Next debug checklist**:
-        1.  Corrigir o Issue 1 para que o backend funcione.
-        2.  Focar a depuração num único fornecedor (ex: Euromais).
-        3.  Criar um script de teste Python () para invocar o adapter do ScrapingBee de forma isolada, permitindo uma depuração mais rápida.
-        4.  Refinar o  do ScrapingBee para lidar corretamente com o login e a navegação pós-login.
-        5.  Implementar o uso do  do ScrapingBee para manter a sessão autenticada entre o pedido de login e os pedidos de pesquisa de produtos.
-        6.  Registar o HTML completo devolvido pelo ScrapingBee para depurar os seletores de extração de preços.
-    - **Why fix this issue and what will be achieved with the fix?**: Esta é a funcionalidade central da aplicação. Sem ela, a aplicação não tem valor.
-    - **Status**: BLOCKED
-    - **Is recurring issue?**: Y
-    - **Should Test frontend/backend/both after fix?**: Backend
-    - **Blocked on other issue**: Issue 1: Backend a falhar devido a erro de sintaxe
+**In progress Task List**:
+Nenhum.
 
 **Upcoming and Future Tasks**
 *   **Upcoming Tasks**:
-    *   **(P0)** Implementar scraping robusto para os 4 fornecedores configurados, corrigindo o Issue 2. O trabalho deve ser retomado em .
+    *   **(P0)** Obter a verificação do utilizador para a correção do bug de comparação de preços.
+    *   **(P1)** Corrigir os scrapers para S. José e Euromais (Issue 1).
 *   **Future Tasks**:
-    *   **(P1)** Adicionar suporte para os restantes fornecedores que o utilizador venha a indicar.
-    *   **(P2)** Melhorar o feedback de progresso do trabalho na interface (ex: barra de progresso), como solicitado no prompt otimizado. Requer alterações em  e no backend.
-    *   **(P2)** Permitir a configuração de seletores CSS por fornecedor na interface, para tornar os adapters mais flexíveis.
-    *   **(P3)** Refinar a exportação para Excel para corresponder ao formato detalhado solicitado, incluindo uma coluna para o preço de cada fornecedor.
+    *   **(P2)** Melhorar o feedback de progresso na UI para os jobs de scraping (ex: barra de progresso em tempo real).
+    *   **(P2)** Configurar um cronjob no ambiente de produção para executar o  periodicamente e manter os preços atualizados.
+    *   **(P3)** Refinar a funcionalidade de exportação para Excel na página de resultados da comparação.
 
 **Completed work in this session**
-- **Estrutura da Aplicação**: Criada a base da aplicação full-stack (React/FastAPI/MongoDB).
-- **Interface do Utilizador**: Construído um dashboard com tema escuro e profissional para upload de ficheiros, gestão de fornecedores e visualização de resultados.
-- **Gestão de Fornecedores**: Implementada a funcionalidade de adicionar/visualizar fornecedores com credenciais encriptadas.
-- **Gestão de Trabalhos**: Implementado o upload de ficheiros Excel para iniciar trabalhos de scraping, uma página de resultados e um botão para apagar trabalhos.
-- **Normalização de Dados**: Adicionada lógica para normalizar os dados dos pneus (ex:  -> ) antes da pesquisa.
-- **Integração com ScrapingBee**: O sistema foi migrado de Playwright para usar a API do ScrapingBee para contornar proteções anti-bot.
+- Corrigido um bug crítico na lógica de comparação de preços para fazer a correspondência por  e .
+- Implementada a arquitetura de worker desacoplado, resolvendo o problema de bloqueio do scraping.
+- Atualizados os scrapers de MP24, Prismanil e Dispnal para extrair  e , além do .
+- Criada uma nova página no frontend () para pesquisar e visualizar todos os preços scraped.
+- Criada uma nova página no frontend () que implementa o fluxo completo: upload de Excel, comparação com preços scraped e visualização de resultados.
+- Implementada uma funcionalidade na UI para editar os seletores CSS de cada fornecedor.
+- Implementados e testados todos os endpoints de backend necessários para suportar as novas funcionalidades.
 
 **Earlier issues found/mentioned but not fixed**
-- **Issue 1: Instabilidade do ambiente Playwright**
-    - **Debug checklist**: Investigar porque é que as variáveis de ambiente () não resolvem o problema de forma consistente após reinicializações. Uma solução mais robusta pode ser necessária se houver necessidade de reverter para o Playwright.
-    - **Why to solve this issue and what will be achieved with this?**: Serve como um plano de contingência caso a abordagem do ScrapingBee falhe.
-    - **Should Test frontend/backend/both after fix**: Backend
-    - **Is recurring issue?**: Y
+- O problema com os scrapers de S. José e Euromais foi identificado e uma tentativa inicial de correção falhou. Está agora listado como o principal .
+
+**Known issue recurrence from previous fork**
+- **Issue recurrence in previous fork**: Scrapers para S. José e Euromais necessitam de ser corrigidos/atualizados.
+- **Recurrence count**: 2+
+- **Status**: NOT STARTED
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Backend**: FastAPI, Pydantic, Motor (driver async para MongoDB).
+- **Backend**: FastAPI, Pydantic, Motor (MongoDB async driver), PyMongo (MongoDB sync driver).
 - **Frontend**: React, Tailwind CSS, Shadcn/UI, Axios.
 - **Database**: MongoDB.
-- **Scraping**: Atualmente focado no **ScrapingBee API**. A arquitetura usa um padrão de Adapter em .
-- **Ambiente**: Contentor Docker gerido por .
+- **Scraping**: Playwright.
+- **Architecture**: Sistema de Job Queue desacoplado com um worker em background, utilizando MongoDB para gerir o estado dos jobs e a concorrência (locks).
+- **Scraping Strategy**: Varia por fornecedor, incluindo interceção de pedidos XHR/API (MP24) e parsing de HTML (Prismanil, Dispnal).
 
 **key DB schema**
-- **suppliers**: , , , , , 
-- **jobs**: , , , , 
-- **job_items**: , , , , , , 
-- **logs**: , , , 
+- **suppliers**: , , ,  (hashed),  (texto simples para o scraper),  (dicionário de seletores CSS).
+- **jobs**: ,  ('upload' ou 'scrape'), ,  (array de itens do Excel para jobs 'upload').
+- **scraped_prices**: , , , , , .
+- **locks**:  (supplier_id), , .
 
 **All files of reference**
-- : Contém a lógica principal da aplicação, endpoints da API e interação com a base de dados.
-- : Ficheiro crítico que contém toda a lógica de scraping e os adapters. **É aqui que se encontra o erro de sintaxe que bloqueia a aplicação.**
-- : Página da interface para visualizar o estado dos trabalhos.
-- : Contém as variáveis de ambiente, incluindo a chave da API do ScrapingBee.
+- : Contém a lógica da API, incluindo o endpoint  que foi recentemente corrigido.
+- : Contém a lógica de scraping para todos os fornecedores.
+- : O processo de worker que executa os jobs.
+- : UI para o fluxo de upload e comparação.
+- : UI para visualizar os resultados detalhados da comparação.
+- : UI para pesquisar todos os preços na base de dados.
+- : UI para gerir fornecedores, que agora contém o botão para editar seletores.
+
+**Areas that need refactoring**:
+- O ficheiro  está a tornar-se grande e complexo. Considerar a divisão da lógica de cada scraper para ficheiros separados (ex: , ).
+- O ficheiro  também está a crescer. As rotas podem ser organizadas em múltiplos ficheiros usando  do FastAPI para melhor modularidade.
+
+**key api endpoints**
+- : Compara um job de upload com os preços scraped. **(Recentemente corrigido)**.
+- : Obtém os preços scraped, com filtro opcional por .
+- : Coloca na fila um novo job de scraping para um ou mais fornecedores.
+- : Atualiza os dados de um fornecedor, incluindo os seletores CSS.
 
 **Critical Info for New Agent**
-- O principal desafio é contornar as proteções anti-bot dos sites B2B portugueses. O scraping direto com Playwright falhou.
-- A estratégia atual é usar o serviço **ScrapingBee**. O utilizador forneceu uma chave de API válida.
-- A chave para o sucesso é implementar corretamente o **fluxo de login** dentro do ScrapingBee. O  atual é genérico e está a falhar. É crucial usar a funcionalidade de **gestão de sessão** (ex: ) para garantir que as pesquisas são feitas com a sessão autenticada.
-- O ficheiro  tornou-se frágil devido a edições imprecisas. Edite-o com cuidado e valide sempre a sintaxe () antes de reiniciar o servidor.
-- **O bloqueador imediato é um erro de sintaxe em  que impede o arranque do backend.** Este problema tem de ser resolvido primeiro.
+- A prioridade máxima é confirmar com o utilizador que a correção do bug na comparação de preços está a funcionar como esperado.
+- A segunda prioridade é investigar e corrigir os scrapers para os fornecedores S. José e Euromais. Esta é uma tarefa recorrente e pode exigir uma depuração mais aprofundada (ex: executar com ).
+- A arquitetura de worker está estável e funcional para os 3 fornecedores principais. Não tente executar o scraping diretamente a partir do processo do servidor web.
 
 **documents and test reports created in this job**
+-  (atualizado)
 - 
-- 
+-  (script temporário para migração de dados)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **Utilizador**: Pediu para adicionar mais dois fornecedores (marketplace, prismanil) com credenciais. (PENDENTE - foram adicionados, mas o sistema está avariado).
-2.  **Utilizador**: Informou que o scraping não funciona e que os fornecedores não têm API, descartando o modo manual. (PENDENTE - agente está a tentar resolver).
-3.  **Utilizador**: Após ver um screenshot dos resultados da pesquisa do Euromais, pediu ao agente para contornar as proteções anti-bot. (PENDENTE - agente está a tentar).
-4.  **Utilizador**: Afirmou que as credenciais funcionam em ambos os sites e sugeriu focar no Euromais. (EM PROGRESSO - agente está focado nisso).
-5.  **Utilizador**: Informou que adicionou outro fornecedor. (CONCLUÍDO - agente acusou a receção).
-6.  **Utilizador**: Deu contexto para as pesquisas (normalização de dados) e pediu um botão para apagar trabalhos. (CONCLUÍDO - agente implementou ambas as funcionalidades).
-7.  **Utilizador**: Forneceu uma chave da API do ScrapingBee. (CONCLUÍDO - agente implementou-a).
-8.  **Utilizador**: Perguntou se existia um serviço de scraping gratuito para testar. (CONCLUÍDO - agente sugeriu e implementou o ScrapingBee).
-9.  **Utilizador**: Pediu para resolver o problema. (PENDENTE).
-10. **Utilizador**: Corrigiu o agente, que pensava que o scraping estava a funcionar, e pediu para resolver o problema. (PENDENTE).
+1.  **User**: Reportou um bug crítico: a comparação de preços não estava a considerar a , levando a resultados incorretos. (*Este é o último problema reportado, que o agente corrigiu*).
+2.  **User**: Pediu para implementar o fluxo completo de upload de Excel e comparação com os preços scraped. (*Concluído*).
+3.  **User**: Pediu uma nova página no frontend para pesquisar e visualizar todos os preços scraped. (*Concluído*).
+4.  **User**: Pediu para testar os scrapers de Prismanil e Dispnal individualmente. (*Concluído*).
+5.  **User**: Forneceu instruções detalhadas para 3 correções críticas no backend e um plano de teste completo para validar a arquitetura do worker. (*Concluído*).
+6.  **User**: Pediu para atualizar os scrapers de Prismanil e Dispnal para extrair marca/modelo e para fazer scraping de todas as medidas do ficheiro Excel. (*Concluído*).
+7.  **User**: Confirmou a escolha da Opção B - Scraping Completo. (*Concluído*).
+8.  **User**: Pediu para implementar a integração dos  e a configuração dos seletores CSS na UI. (*Concluído*).
+9.  **User**: Pediu para seguir a ordem de prioridade P0 e P1. (*Instrução seguida*).
+10. **User**: Pediu um resumo do progresso. (*Concluído*).
 
 **Project Health Check:**
-- **Broken**: A aplicação está totalmente inoperacional. O serviço de backend não arranca devido a um erro de sintaxe em . A funcionalidade principal de scraping também está avariada.
+- **Broken**: Os scrapers para S. José e Euromais não estão funcionais.
+- **Mocked**: Nenhum.
 
 **3rd Party Integrations**
-- **ScrapingBee**: Usado para web scraping para contornar proteções anti-bot. Requer uma chave de API do utilizador, que foi fornecida e está guardada em .
+- **Playwright**: Utilizado para web scraping.
 
 **Testing status**
-- Testing agent used after significant changes: NO
-- Troubleshoot agent used after agent stuck in loop: NO
-- Test files created: , 
-- Known regressions: O servidor de backend, que anteriormente funcionava, agora não arranca devido a um erro de sintaxe.
+- **Testing agent used after significant changes**: YES (uma vez, para validar o pipeline do worker)
+- **Troubleshoot agent used after agent stuck in loop**: NO
+- **Test files created**: 
+- **Known regressions**: Nenhuma.
 
 **Credentials to test flow:**
-- **S. José**: user: , pass: 
-- **Euromais**: (mesmas credenciais que S. José, segundo o utilizador)
-- **Marketplace (mp24.online)**: user: , pass: 
-- **Prismanil**: user: , pass: 
-- **ScrapingBee API Key**: Está guardada em .
+- **S. José**: user: , pass:  (Login falha)
+- **Euromais**: user: , pass:  (Timeout)
+- **Marketplace (mp24.online)**: user: , pass:  (Funciona)
+- **Prismanil**: user: , pass:  (Funciona)
+- **Dispnal**: user: , pass:  (Funciona)
 
 **What agent forgot to execute**
-- O agente ainda não implementou o feedback de progresso detalhado (barra de progresso) nem a configuração avançada de fornecedores (seletores CSS na UI), que faziam parte do prompt otimizado acordado.
-- Não foi criado um script de teste isolado para os scrapers, o que torna os ciclos de depuração lentos, pois dependem da execução do trabalho completo através da API.</analysis>
+- O agente seguiu de perto as instruções do utilizador e abordou as tarefas planeadas. Os itens não concluídos (scrapers de S. José/Euromais, cronjob, etc.) estão corretamente listados como pendentes ou futuros.</analysis>

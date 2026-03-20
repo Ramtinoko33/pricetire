@@ -429,7 +429,7 @@ async def get_job_results(job_id: str):
 
 @api_router.post("/jobs/{job_id}/compare")
 async def compare_job_with_scraped_prices(job_id: str):
-    """Compare job items with existing scraped prices by MEDIDA + MARCA"""
+    """Compare job items with existing scraped prices by MEDIDA + MARCA ONLY (no fallback)"""
     job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -449,44 +449,41 @@ async def compare_job_with_scraped_prices(job_id: str):
         medida_norm = item['medida'].replace('/', '').replace('R', '').replace('r', '')
         marca_norm = (item.get('marca') or '').strip().upper()
         
-        # First try: exact match by medida + marca
-        scraped = await db.scraped_prices.find(
-            {
-                "medida": medida_norm, 
-                "marca": marca_norm,
-                "price": {"$ne": None}
-            },
-            {"_id": 0}
-        ).sort("price", 1).to_list(100)
+        scraped = []
+        match_type = None
         
-        match_type = "exact"
-        
-        # Second try: if no exact match, try partial brand match (for variations like "GOOD YEAR" vs "GOODYEAR")
-        if not scraped and marca_norm:
-            # Create regex pattern to match brand variations
-            marca_pattern = marca_norm.replace(' ', '.*')
+        # ONLY match if we have a marca
+        if marca_norm:
+            # Try exact match by medida + marca (both uppercase)
             scraped = await db.scraped_prices.find(
                 {
                     "medida": medida_norm, 
-                    "marca": {"$regex": marca_pattern, "$options": "i"},
+                    "marca": marca_norm,
                     "price": {"$ne": None}
                 },
                 {"_id": 0}
             ).sort("price", 1).to_list(100)
-            match_type = "partial"
+            
+            if scraped:
+                match_type = "exact"
+            else:
+                # Try partial brand match (for variations like "GOOD YEAR" vs "GOODYEAR")
+                marca_pattern = marca_norm.replace(' ', '.*')
+                scraped = await db.scraped_prices.find(
+                    {
+                        "medida": medida_norm, 
+                        "marca": {"$regex": f"^{marca_pattern}$", "$options": "i"},
+                        "price": {"$ne": None}
+                    },
+                    {"_id": 0}
+                ).sort("price", 1).to_list(100)
+                
+                if scraped:
+                    match_type = "partial"
         
-        # Third try: fallback to medida only if no brand match found
-        if not scraped:
-            scraped = await db.scraped_prices.find(
-                {
-                    "medida": medida_norm, 
-                    "price": {"$ne": None}
-                },
-                {"_id": 0}
-            ).sort("price", 1).to_list(100)
-            match_type = "medida_only"
+        # NO FALLBACK - if no medida+marca match, leave prices empty
         
-        if scraped:
+        if scraped and len(scraped) > 0:
             best = scraped[0]
             best_price = best['price']
             best_supplier = best['supplier_name']
@@ -497,13 +494,14 @@ async def compare_job_with_scraped_prices(job_id: str):
             economia_euro = meu_preco - best_price if meu_preco else None
             economia_percent = (economia_euro / meu_preco * 100) if meu_preco and economia_euro else None
             
-            # Build supplier_prices dict with brand info
+            # Build supplier_prices dict (only same brand)
             supplier_prices = {}
             for s in scraped:
-                key = f"{s['supplier_name']} ({s.get('marca', 'N/A')})"
-                supplier_prices[key] = s['price']
+                key = s['supplier_name']
+                if key not in supplier_prices or s['price'] < supplier_prices[key]:
+                    supplier_prices[key] = s['price']
             
-            # Update item
+            # Update item with match found
             await db.job_items.update_one(
                 {"id": item['id']},
                 {"$set": {
@@ -519,11 +517,26 @@ async def compare_job_with_scraped_prices(job_id: str):
             )
             
             updated_count += 1
-            if match_type in ["exact", "partial"]:
-                matched_count += 1
+            matched_count += 1
             if economia_euro and economia_euro > 0:
                 found_count += 1
                 total_savings += economia_euro
+        else:
+            # No match found - clear previous values
+            await db.job_items.update_one(
+                {"id": item['id']},
+                {"$set": {
+                    "melhor_preco": None,
+                    "melhor_fornecedor": None,
+                    "melhor_marca": None,
+                    "match_type": None,
+                    "economia_euro": None,
+                    "economia_percent": None,
+                    "supplier_prices": {},
+                    "status": "no_match"
+                }}
+            )
+            updated_count += 1
     
     # Update job stats
     await db.jobs.update_one(
@@ -541,6 +554,7 @@ async def compare_job_with_scraped_prices(job_id: str):
     return {
         "message": "Comparison completed",
         "items_processed": updated_count,
+        "items_matched": matched_count,
         "items_with_savings": found_count,
         "total_savings": round(total_savings, 2)
     }
