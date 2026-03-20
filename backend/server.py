@@ -429,7 +429,13 @@ async def get_job_results(job_id: str):
 
 @api_router.post("/jobs/{job_id}/compare")
 async def compare_job_with_scraped_prices(job_id: str):
-    """Compare job items with existing scraped prices by MEDIDA + MARCA ONLY (no fallback)"""
+    """
+    Compare job items with scraped prices using hierarchical matching:
+    Level 1: medida + marca + modelo (partial regex match)
+    Level 2: medida + marca (fallback if model not found)
+    """
+    import re
+    
     job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -448,41 +454,69 @@ async def compare_job_with_scraped_prices(job_id: str):
         # Normalize medida and marca for matching
         medida_norm = item['medida'].replace('/', '').replace('R', '').replace('r', '')
         marca_norm = (item.get('marca') or '').strip().upper()
+        modelo_norm = (item.get('modelo') or '').strip().upper()
         
         scraped = []
         match_type = None
+        matched_modelo = None
         
         # ONLY match if we have a marca
         if marca_norm:
-            # Try exact match by medida + marca (both uppercase)
-            scraped = await db.scraped_prices.find(
-                {
-                    "medida": medida_norm, 
-                    "marca": marca_norm,
-                    "price": {"$ne": None}
-                },
-                {"_id": 0}
-            ).sort("price", 1).to_list(100)
-            
-            if scraped:
-                match_type = "exact"
-            else:
-                # Try partial brand match (for variations like "GOOD YEAR" vs "GOODYEAR")
-                marca_pattern = marca_norm.replace(' ', '.*')
+            # ============ LEVEL 1: medida + marca + modelo ============
+            if modelo_norm:
+                # Create regex pattern for partial model match
+                # "PRIMACY 4" should match "PRIMACY 4 S2 DESM" or "PRIMACY 4+"
+                # Escape special regex chars and make spaces flexible
+                modelo_escaped = re.escape(modelo_norm)
+                modelo_pattern = modelo_escaped.replace(r'\ ', '.*')  # spaces become .*
+                
+                # Query with modelo regex
                 scraped = await db.scraped_prices.find(
                     {
-                        "medida": medida_norm, 
-                        "marca": {"$regex": f"^{marca_pattern}$", "$options": "i"},
+                        "medida": medida_norm,
+                        "marca": marca_norm,
+                        "modelo": {"$regex": modelo_pattern, "$options": "i"},
                         "price": {"$ne": None}
                     },
                     {"_id": 0}
                 ).sort("price", 1).to_list(100)
                 
                 if scraped:
-                    match_type = "partial"
+                    match_type = "modelo"
+                    matched_modelo = scraped[0].get('modelo', '')
+            
+            # ============ LEVEL 2: medida + marca (fallback) ============
+            if not scraped:
+                # Try exact match by medida + marca (both uppercase)
+                scraped = await db.scraped_prices.find(
+                    {
+                        "medida": medida_norm, 
+                        "marca": marca_norm,
+                        "price": {"$ne": None}
+                    },
+                    {"_id": 0}
+                ).sort("price", 1).to_list(100)
+                
+                if scraped:
+                    match_type = "marca"
+                    matched_modelo = scraped[0].get('modelo', '')
+                else:
+                    # Try partial brand match (for variations like "GOOD YEAR" vs "GOODYEAR")
+                    marca_pattern = marca_norm.replace(' ', '.*')
+                    scraped = await db.scraped_prices.find(
+                        {
+                            "medida": medida_norm, 
+                            "marca": {"$regex": f"^{marca_pattern}$", "$options": "i"},
+                            "price": {"$ne": None}
+                        },
+                        {"_id": 0}
+                    ).sort("price", 1).to_list(100)
+                    
+                    if scraped:
+                        match_type = "marca_partial"
+                        matched_modelo = scraped[0].get('modelo', '')
         
-        # NO FALLBACK - if no medida+marca match, leave prices empty
-        
+        # Process results
         if scraped and len(scraped) > 0:
             best = scraped[0]
             best_price = best['price']
@@ -508,6 +542,7 @@ async def compare_job_with_scraped_prices(job_id: str):
                     "melhor_preco": best_price,
                     "melhor_fornecedor": best_supplier,
                     "melhor_marca": best_marca,
+                    "modelo_encontrado": matched_modelo,
                     "match_type": match_type,
                     "economia_euro": round(economia_euro, 2) if economia_euro else None,
                     "economia_percent": round(economia_percent, 2) if economia_percent else None,
@@ -529,6 +564,7 @@ async def compare_job_with_scraped_prices(job_id: str):
                     "melhor_preco": None,
                     "melhor_fornecedor": None,
                     "melhor_marca": None,
+                    "modelo_encontrado": None,
                     "match_type": None,
                     "economia_euro": None,
                     "economia_percent": None,

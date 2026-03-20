@@ -339,6 +339,7 @@ const Comparar = () => {
                       <TableHead>Medida</TableHead>
                       <TableHead>Marca</TableHead>
                       <TableHead>Modelo</TableHead>
+                      <TableHead>Modelo Encontrado</TableHead>
                       <TableHead className="text-right">Meu Preço</TableHead>
                       <TableHead className="text-right">Melhor Preço</TableHead>
                       <TableHead>Fornecedor</TableHead>
@@ -361,19 +362,22 @@ const Comparar = () => {
                           <TableCell>
                             <div className="flex items-center gap-2">
                               {item.marca}
-                              {matchType === 'exact' && (
-                                <Badge variant="outline" className="text-xs bg-green-50 text-green-700">exact</Badge>
+                              {matchType === 'modelo' && (
+                                <Badge variant="outline" className="text-xs bg-green-50 text-green-700">modelo</Badge>
                               )}
-                              {matchType === 'partial' && (
-                                <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700">partial</Badge>
+                              {matchType === 'marca' && (
+                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">marca</Badge>
                               )}
-                              {matchType === 'medida_only' && (
-                                <Badge variant="outline" className="text-xs bg-gray-50 text-gray-500">medida</Badge>
+                              {matchType === 'marca_partial' && (
+                                <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700">parcial</Badge>
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="max-w-[150px] truncate" title={item.modelo}>
+                          <TableCell className="max-w-[120px] truncate text-slate-600" title={item.modelo}>
                             {item.modelo || '-'}
+                          </TableCell>
+                          <TableCell className="max-w-[150px] truncate font-medium" title={item.modelo_encontrado}>
+                            {item.modelo_encontrado || '-'}
                           </TableCell>
                           <TableCell className="text-right font-medium">
                             {item.meu_preco ? `€${item.meu_preco.toFixed(2)}` : '-'}
