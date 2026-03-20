@@ -214,8 +214,18 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
             if captured_tyres:
                 products = []
                 for tyre in captured_tyres:
-                    brand = tyre.get('manufacturer', '').upper()
-                    model = tyre.get('profile', '')
+                    brand = tyre.get('manufacturer', '').upper().strip()
+                    model = tyre.get('profile', '').strip()
+                    
+                    # Clean model - remove any size patterns that might be included
+                    if model:
+                        import re
+                        # Remove size patterns
+                        model = re.sub(r'\d{3}[/\s]?\d{2}[R\s]?\d{2}', '', model)
+                        # Remove load/speed index at start or end
+                        model = re.sub(r'^\s*\d{2,3}[VHWYTQSR]\s+', '', model)
+                        model = re.sub(r'\s+\d{2,3}[VHWYTQSR]\s*$', '', model)
+                        model = model.strip()
                     
                     # Get price from bestPricesBySource
                     best_prices = tyre.get('bestPricesBySource', {})
@@ -229,10 +239,11 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
                             price = best_price['purchasePrice']
                             break
                     
+                    # Skip items without brand - these are incomplete records
                     if brand and price and price > 15 and price < 500:
                         products.append({
                             'brand': brand,
-                            'model': model,
+                            'model': model if model else 'N/A',
                             'price': price
                         })
                 
@@ -320,6 +331,27 @@ async def scrape_prismanil(page, username: str, password: str, medida: str) -> d
                 const products = [];
                 const items = document.querySelectorAll('[data-produto][data-preco]');
                 
+                // Helper function to clean model string
+                function cleanModel(text) {
+                    if (!text) return '';
+                    let model = text;
+                    
+                    // Remove load/speed index patterns at the end (91V, 91H, etc.)
+                    model = model.replace(/\\s+\\d{2,3}[VHWYTQSR]\\s*$/gi, '');
+                    model = model.replace(/\\s+\\d{2,3}[VHWYTQSR]\\s+/gi, ' ');
+                    
+                    // Remove DOT patterns
+                    model = model.replace(/\\bDOT\\d+/gi, '');
+                    
+                    // Remove TL suffix
+                    model = model.replace(/\\s+TL\\s*$/gi, '');
+                    
+                    // Clean up
+                    model = model.replace(/\\s+/g, ' ').trim();
+                    
+                    return model;
+                }
+                
                 items.forEach(item => {
                     const produtoStr = item.getAttribute('data-produto') || '';
                     const precoStr = item.getAttribute('data-preco') || '';
@@ -328,14 +360,16 @@ async def scrape_prismanil(page, username: str, password: str, medida: str) -> d
                         // Parse produto string: "BRIDGESTONE 205/55R16 EP150 91V"
                         const parts = produtoStr.trim().split(' ');
                         const brand = parts[0] || '';
-                        const model = parts.slice(2).join(' ') || '';
+                        // Skip the size (index 1), get everything else as model
+                        const rawModel = parts.slice(2).join(' ') || '';
+                        const model = cleanModel(rawModel);
                         
                         const price = parseFloat(precoStr.replace(',', '.'));
                         
                         if (brand && price > 15 && price < 500) {
                             products.push({
                                 brand: brand.toUpperCase(),
-                                model: model,
+                                model: model || rawModel,
                                 price: price
                             });
                         }
@@ -550,6 +584,45 @@ async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
                 const products = [];
                 const rows = document.querySelectorAll('tr');
                 
+                // Helper function to clean model string
+                function cleanModel(text, brand) {
+                    if (!text) return '';
+                    
+                    // Remove the brand name
+                    let model = text.replace(new RegExp(brand, 'gi'), '').trim();
+                    
+                    // Remove tire size patterns (205/55R16, 2055516, 205/55ZR16, etc.)
+                    model = model.replace(/\\d{3}[\\/\\s]?\\d{2}[Z]?R?\\d{2}/gi, '');
+                    
+                    // Remove patterns like (94Y), (91W), etc.
+                    model = model.replace(/\\(\\d{2,3}[VHWYTQSR]\\)/gi, '');
+                    
+                    // Remove load/speed index patterns (91V, 91H, 91W, 95T, etc.)
+                    model = model.replace(/^\\s*\\d{2,3}[VHWYTQSR]\\b/gi, '');
+                    model = model.replace(/\\s+\\d{2,3}[VHWYTQSR]\\b/gi, '');
+                    
+                    // Remove common suffixes/prefixes
+                    model = model.replace(/\\bXL\\b/gi, '').trim();
+                    model = model.replace(/\\bRFT\\b/gi, '').trim();
+                    model = model.replace(/\\bTL\\b/gi, '').trim();
+                    model = model.replace(/\\bDOT\\d+/gi, '').trim();
+                    model = model.replace(/\\bN0\\b/gi, '').trim();
+                    model = model.replace(/\\bN1\\b/gi, '').trim();
+                    model = model.replace(/\\bN2\\b/gi, '').trim();
+                    model = model.replace(/\\bMOE\\b/gi, '').trim();
+                    model = model.replace(/\\bSSR\\b/gi, '').trim();
+                    model = model.replace(/\\bRSC\\b/gi, '').trim();
+                    model = model.replace(/\\bAO\\b/gi, '').trim();
+                    
+                    // Clean up multiple spaces and trim
+                    model = model.replace(/\\s+/g, ' ').trim();
+                    
+                    // Remove leading/trailing special chars
+                    model = model.replace(/^[\\s\\-\\/\\(\\)]+/, '').replace(/[\\s\\-\\/\\(\\)]+$/, '');
+                    
+                    return model;
+                }
+                
                 rows.forEach(row => {
                     const cells = row.querySelectorAll('td');
                     const text = row.textContent || '';
@@ -563,14 +636,16 @@ async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
                         
                         if (price > 15 && price < 500) {
                             let brand = '';
-                            let model = '';
+                            let rawModel = '';
                             
                             // Known tire brands
                             const brands = ['MICHELIN', 'BRIDGESTONE', 'CONTINENTAL', 'PIRELLI', 'GOODYEAR', 
                                            'DUNLOP', 'YOKOHAMA', 'HANKOOK', 'KUMHO', 'NEXEN', 'TOYO',
                                            'FIRESTONE', 'FULDA', 'SEMPERIT', 'BARUM', 'UNIROYAL', 'KLEBER',
                                            'GOODRIDE', 'WESTLAKE', 'LINGLONG', 'TRIANGLE', 'FORTUNE',
-                                           'APLUS', 'ROADX', 'IMPERIAL', 'MINERVA', 'TRISTAR', 'TRACMAX'];
+                                           'APLUS', 'ROADX', 'IMPERIAL', 'MINERVA', 'TRISTAR', 'TRACMAX',
+                                           'FALKEN', 'NOKIAN', 'VREDESTEIN', 'BF GOODRICH', 'BFGOODRICH',
+                                           'LAUFENN', 'COOPER', 'GENERAL', 'GITI', 'GT RADIAL'];
                             
                             cells.forEach(cell => {
                                 const cellText = cell.textContent.trim().toUpperCase();
@@ -578,10 +653,10 @@ async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
                                 for (const b of brands) {
                                     if (cellText.includes(b)) {
                                         brand = b;
-                                        // Model is usually after brand in same cell
+                                        // Get everything after brand
                                         const parts = cellText.split(b);
                                         if (parts[1]) {
-                                            model = parts[1].trim().split('\\n')[0].trim();
+                                            rawModel = parts[1].trim().split('\\n')[0].trim();
                                         }
                                         break;
                                     }
@@ -589,9 +664,10 @@ async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
                             });
                             
                             if (brand) {
+                                const model = cleanModel(rawModel, brand);
                                 products.push({
                                     brand: brand,
-                                    model: model,
+                                    model: model || rawModel,
                                     price: price
                                 });
                             }
@@ -929,12 +1005,14 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
                             "scraped_at": datetime.now(timezone.utc),
                         }
                         
-                        # Upsert by supplier + medida + marca
+                        # Upsert by supplier + medida + marca + modelo
+                        # This ensures different models of the same brand are stored separately
                         await db.scraped_prices.update_one(
                             {
                                 "supplier_name": supplier['name'], 
                                 "medida": medida,
-                                "marca": prod.get('brand', '').upper()
+                                "marca": prod.get('brand', '').upper(),
+                                "modelo": prod.get('model', '')
                             },
                             {"$set": price_doc},
                             upsert=True
