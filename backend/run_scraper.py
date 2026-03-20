@@ -487,12 +487,18 @@ async def scrape_dispnal(page, username: str, password: str, medida: str) -> dic
     return result
 
 async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
-    """Scrape S. José Pneus"""
-    result = {"supplier": "S. José Pneus", "price": None, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()}
+    """Scrape S. José Pneus - extracts ALL products with brand/model"""
+    result = {
+        "supplier": "S. José Pneus", 
+        "price": None, 
+        "error": None, 
+        "products": [],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
     
     try:
         print("  [S. José] Logging in...")
-        await page.goto("https://b2b.sjosepneus.com/login.aspx", wait_until="networkidle", timeout=60000)
+        await page.goto("https://b2b.sjosepneus.com", wait_until="domcontentloaded", timeout=60000)
         await asyncio.sleep(2)
         
         # Fill login form
@@ -504,41 +510,118 @@ async def scrape_sjose(page, username: str, password: str, medida: str) -> dict:
         if await password_input.count() > 0:
             await password_input.fill(password)
         
-        # Click login button
-        login_btn = page.locator('#ContentPlaceHolder1_ctrlLogin_Login_LoginButton, input[type="submit"]')
+        # Click login button (correct ID)
+        login_btn = page.locator('#ContentPlaceHolder1_ctrlLogin_Login_btnLogin')
         if await login_btn.count() > 0:
-            await login_btn.first.click()
+            await login_btn.click()
         await asyncio.sleep(5)
+        
+        # Check if login succeeded
+        if "default.aspx" not in page.url:
+            result["error"] = "Login failed"
+            return result
+        
+        print("  [S. José] Login successful, navigating to search...")
+        
+        # Navigate to search page via link click
+        pesquisa_link = page.locator('a:has-text("Pesquisa")').first
+        if await pesquisa_link.count() > 0:
+            await pesquisa_link.click()
+            await asyncio.sleep(10)
+        else:
+            result["error"] = "Search link not found"
+            return result
         
         print("  [S. José] Searching for products...")
         medida_norm = normalize_medida(medida)
         
-        # Try to find search field
-        search_input = page.locator('input[type="text"][id*="search"], input[type="text"][name*="pesq"]').first
-        if await search_input.count() > 0:
-            await search_input.fill(medida_norm)
-            await search_input.press('Enter')
-            await asyncio.sleep(5)
+        # Fill the size search field (found during testing)
+        size_input = page.locator('#ContentPlaceHolder1_txtSize')
+        if await size_input.count() > 0:
+            await size_input.fill(medida_norm)
+            await asyncio.sleep(1)
             
-            content = await page.content()
-            prices = extract_prices(content)
-            if prices:
+            # Submit search via Enter key
+            await size_input.press('Enter')
+            await asyncio.sleep(10)
+            
+            # Extract products from table
+            products = await page.evaluate('''() => {
+                const products = [];
+                const rows = document.querySelectorAll('tr');
+                
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('td');
+                    const text = row.textContent || '';
+                    
+                    // Look for price pattern
+                    const priceMatch = text.match(/(\\d+[,\\.]\\d{2})\\s*€|€\\s*(\\d+[,\\.]\\d{2})/);
+                    
+                    if (priceMatch && cells.length >= 2) {
+                        const priceStr = priceMatch[1] || priceMatch[2];
+                        const price = parseFloat(priceStr.replace(',', '.'));
+                        
+                        if (price > 15 && price < 500) {
+                            let brand = '';
+                            let model = '';
+                            
+                            // Known tire brands
+                            const brands = ['MICHELIN', 'BRIDGESTONE', 'CONTINENTAL', 'PIRELLI', 'GOODYEAR', 
+                                           'DUNLOP', 'YOKOHAMA', 'HANKOOK', 'KUMHO', 'NEXEN', 'TOYO',
+                                           'FIRESTONE', 'FULDA', 'SEMPERIT', 'BARUM', 'UNIROYAL', 'KLEBER',
+                                           'GOODRIDE', 'WESTLAKE', 'LINGLONG', 'TRIANGLE', 'FORTUNE',
+                                           'APLUS', 'ROADX', 'IMPERIAL', 'MINERVA', 'TRISTAR', 'TRACMAX'];
+                            
+                            cells.forEach(cell => {
+                                const cellText = cell.textContent.trim().toUpperCase();
+                                
+                                for (const b of brands) {
+                                    if (cellText.includes(b)) {
+                                        brand = b;
+                                        // Model is usually after brand in same cell
+                                        const parts = cellText.split(b);
+                                        if (parts[1]) {
+                                            model = parts[1].trim().split('\\n')[0].trim();
+                                        }
+                                        break;
+                                    }
+                                }
+                            });
+                            
+                            if (brand) {
+                                products.push({
+                                    brand: brand,
+                                    model: model,
+                                    price: price
+                                });
+                            }
+                        }
+                    }
+                });
+                
+                return products;
+            }''')
+            
+            if products and len(products) > 0:
+                result["products"] = products
+                prices = [p['price'] for p in products]
                 result["price"] = min(prices)
                 result["all_prices"] = sorted(prices)[:10]
-                print(f"  [S. José] Found {len(prices)} prices, best: €{result['price']}")
+                print(f"  [S. José] Found {len(products)} products with brand/model")
+                for p in products[:3]:
+                    print(f"    - {p['brand']} {p['model']}: €{p['price']}")
             else:
-                result["error"] = "No prices found"
+                # Fallback to simple price extraction
+                content = await page.content()
+                prices = extract_prices(content)
+                if prices:
+                    result["price"] = min(prices)
+                    result["all_prices"] = sorted(prices)[:10]
+                    print(f"  [S. José] Fallback: Found {len(prices)} prices, best: €{result['price']}")
+                else:
+                    result["error"] = "No products found"
         else:
-            # Look for tire category link
-            tyre_link = page.locator('a:has-text("Pneu"), a:has-text("Turismo")')
-            if await tyre_link.count() > 0:
-                await tyre_link.first.click()
-                await asyncio.sleep(3)
-            
-            content = await page.content()
-            with open('/app/tmp/sjose_after_login.html', 'w') as f:
-                f.write(content)
-            result["error"] = "Search interface not found"
+            result["error"] = "Search field not found"
             
     except Exception as e:
         result["error"] = str(e)
