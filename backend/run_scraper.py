@@ -824,10 +824,33 @@ async def _run_supplier_async(supplier_id: str, sizes: list, job_id: str = None)
     client = AsyncIOMotorClient(MONGO_URL)
     db = client[DB_NAME]
     
-    # Try finding by id field or by name
+    # Try finding by id field or by name (with flexible matching)
     supplier = await db.suppliers.find_one({"id": supplier_id})
     if not supplier:
         supplier = await db.suppliers.find_one({"name": {"$regex": supplier_id, "$options": "i"}})
+    if not supplier:
+        # Try more flexible matching (e.g., "sjose" -> "S. José", "mp24" -> "MP24")
+        # Remove special chars and create flexible pattern
+        clean_id = supplier_id.replace('.', '').replace(' ', '')
+        supplier = await db.suppliers.find_one({
+            "name": {"$regex": f".*{clean_id}.*", "$options": "i"}
+        })
+    if not supplier:
+        # Final attempt: normalize accents and compare
+        import unicodedata
+        def normalize_text(text):
+            # Remove accents and special chars
+            text = unicodedata.normalize('NFD', text)
+            text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+            return text.lower().replace('.', '').replace(' ', '').replace('-', '')
+        
+        supplier_id_norm = normalize_text(supplier_id)
+        suppliers = await db.suppliers.find({}).to_list(100)
+        for s in suppliers:
+            name_norm = normalize_text(s['name'])
+            if supplier_id_norm in name_norm or name_norm in supplier_id_norm:
+                supplier = s
+                break
     
     if not supplier:
         print(f"Supplier not found: {supplier_id}")
