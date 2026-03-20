@@ -841,6 +841,133 @@ async def get_scrape_job(job_id: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# ============ Worker Management ============
+
+@api_router.get("/worker/status")
+async def get_worker_status():
+    """Check if the worker is running"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "worker.py"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        is_running = result.returncode == 0
+        pids = result.stdout.strip().split('\n') if is_running else []
+        
+        # Get recent job activity
+        recent_jobs = await db.jobs.find({"type": "scrape"}).sort("created_at", -1).limit(5).to_list(5)
+        queued_count = await db.jobs.count_documents({"type": "scrape", "status": "queued"})
+        running_count = await db.jobs.count_documents({"type": "scrape", "status": "running"})
+        
+        return {
+            "running": is_running,
+            "pids": pids,
+            "queued_jobs": queued_count,
+            "running_jobs": running_count,
+            "recent_jobs": len(recent_jobs)
+        }
+    except Exception as e:
+        return {"running": False, "error": str(e)}
+
+@api_router.post("/worker/start")
+async def start_worker():
+    """Start the worker process if not running"""
+    import subprocess
+    import os
+    
+    # Check if already running
+    check = subprocess.run(["pgrep", "-f", "worker.py"], capture_output=True, text=True)
+    if check.returncode == 0:
+        return {"ok": True, "message": "Worker already running", "pid": check.stdout.strip()}
+    
+    # Start worker using the venv python
+    try:
+        # Use the same venv as the backend
+        python_path = "/root/.venv/bin/python3"
+        cmd = f"cd /app/backend && nohup {python_path} worker.py >> /tmp/worker.log 2>&1 &"
+        os.system(cmd)
+        
+        # Wait a bit and check if it started
+        import time
+        time.sleep(3)
+        
+        check = subprocess.run(["pgrep", "-f", "worker.py"], capture_output=True, text=True)
+        if check.returncode == 0:
+            return {"ok": True, "message": "Worker started successfully", "pid": check.stdout.strip()}
+        else:
+            # Read log for errors
+            try:
+                with open("/tmp/worker.log", "r") as f:
+                    last_lines = f.read().split('\n')[-10:]
+                return {"ok": False, "message": "Worker failed to start", "log": last_lines}
+            except:
+                return {"ok": False, "message": "Worker failed to start"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+class EnqueueBatchReq(PydanticBaseModel):
+    sizes: List[str]
+    supplier_ids: Optional[List[str]] = None  # If None, use all active suppliers
+
+@api_router.post("/scrape/enqueue-batch")
+async def enqueue_batch_scrape(req: EnqueueBatchReq):
+    """Enqueue scraping jobs for multiple suppliers and sizes at once"""
+    # Get suppliers
+    if req.supplier_ids:
+        # Use provided supplier IDs
+        suppliers = []
+        for sid in req.supplier_ids:
+            supplier = await db.suppliers.find_one({"id": sid, "is_active": True}, {"_id": 0})
+            if not supplier:
+                supplier = await db.suppliers.find_one({"name": {"$regex": sid, "$options": "i"}, "is_active": True}, {"_id": 0})
+            if supplier:
+                suppliers.append(supplier)
+    else:
+        # Use all active suppliers
+        suppliers = await db.suppliers.find({"is_active": True}, {"_id": 0}).to_list(100)
+    
+    if not suppliers:
+        raise HTTPException(status_code=400, detail="No active suppliers found")
+    
+    # Normalize sizes
+    normalized_sizes = []
+    for size in req.sizes:
+        norm = size.strip().replace('/', '').replace('R', '').replace('r', '')
+        if norm:
+            normalized_sizes.append(norm)
+    
+    if not normalized_sizes:
+        raise HTTPException(status_code=400, detail="No valid sizes provided")
+    
+    # Create jobs for each supplier
+    job_ids = []
+    for supplier in suppliers:
+        job = {
+            "type": "scrape",
+            "supplier_id": supplier['name'].lower().replace(' ', '').replace('.', ''),
+            "supplier_name": supplier['name'],
+            "payload": {"sizes": normalized_sizes},
+            "status": "queued",
+            "attempts": 0,
+            "created_at": datetime.utcnow(),
+            "started_at": None,
+            "finished_at": None,
+            "last_error": None,
+        }
+        res = await db.jobs.insert_one(job)
+        job_ids.append(str(res.inserted_id))
+    
+    return {
+        "ok": True,
+        "jobs_created": len(job_ids),
+        "job_ids": job_ids,
+        "suppliers": [s['name'] for s in suppliers],
+        "sizes": normalized_sizes
+    }
+
 app.include_router(api_router)
 
 app.add_middleware(

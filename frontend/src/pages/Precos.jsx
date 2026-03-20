@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { scrapedPricesAPI, scrapeAPI, suppliersAPI } from '../lib/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import { scrapedPricesAPI, scrapeAPI, suppliersAPI, workerAPI } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Search, RefreshCw, TrendingDown, TrendingUp, Loader2, Zap } from 'lucide-react';
+import { Progress } from '../components/ui/progress';
+import { Search, RefreshCw, TrendingDown, Loader2, Zap, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Precos = () => {
@@ -15,12 +16,63 @@ const Precos = () => {
   const [scraping, setScraping] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
   const [stats, setStats] = useState(null);
+  
+  // Scraping progress state
+  const [scrapingProgress, setScrapingProgress] = useState(null);
+  const [jobIds, setJobIds] = useState([]);
 
   useEffect(() => {
     loadSuppliers();
-    // Load all prices on initial load
     loadAllPrices();
   }, []);
+
+  // Poll for job progress
+  useEffect(() => {
+    if (!scraping || jobIds.length === 0) return;
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const { data: jobs } = await scrapeAPI.getJobs(null, 20);
+        
+        // Filter our jobs
+        const ourJobs = jobs.filter(j => jobIds.includes(j._id));
+        
+        const completed = ourJobs.filter(j => j.status === 'done').length;
+        const failed = ourJobs.filter(j => j.status === 'error').length;
+        const running = ourJobs.filter(j => j.status === 'running').length;
+        const queued = ourJobs.filter(j => j.status === 'queued').length;
+        
+        setScrapingProgress({
+          total: ourJobs.length,
+          completed,
+          failed,
+          running,
+          queued,
+          percent: Math.round((completed / ourJobs.length) * 100),
+          jobs: ourJobs
+        });
+        
+        // All done
+        if (queued === 0 && running === 0) {
+          clearInterval(pollInterval);
+          setScraping(false);
+          
+          if (completed === ourJobs.length) {
+            toast.success(`Scraping concluído! ${completed} fornecedores processados.`);
+          } else {
+            toast.warning(`Scraping concluído com ${failed} erros.`);
+          }
+          
+          // Reload prices
+          searchPrices();
+        }
+      } catch (error) {
+        console.error('Error polling jobs:', error);
+      }
+    }, 3000);
+    
+    return () => clearInterval(pollInterval);
+  }, [scraping, jobIds]);
 
   const loadSuppliers = async () => {
     try {
@@ -52,13 +104,21 @@ const Precos = () => {
 
     setLoading(true);
     try {
-      // Normalize medida: remove / and R
-      const medidaNorm = medida.replace(/\//g, '').replace(/R/gi, '');
-      const { data } = await scrapedPricesAPI.getAll(medidaNorm);
-      processPrices(data);
+      // Support multiple sizes separated by comma
+      const sizes = medida.split(',').map(s => s.trim().replace(/\//g, '').replace(/R/gi, '')).filter(s => s);
       
-      if (data.length === 0) {
-        toast.info(`Nenhum preço encontrado para "${medida}". Execute um novo scraping.`);
+      if (sizes.length === 1) {
+        const { data } = await scrapedPricesAPI.getAll(sizes[0]);
+        processPrices(data);
+      } else {
+        // Multiple sizes - fetch all and filter
+        const { data } = await scrapedPricesAPI.getAll();
+        const filtered = data.filter(p => sizes.includes(p.medida));
+        processPrices(filtered);
+      }
+      
+      if (prices.length === 0) {
+        toast.info(`Nenhum preço encontrado. Execute um novo scraping.`);
       }
     } catch (error) {
       console.error('Error searching prices:', error);
@@ -69,11 +129,9 @@ const Precos = () => {
   };
 
   const processPrices = (data) => {
-    // Sort by price (lowest first)
     const sorted = [...data].sort((a, b) => (a.price || 999) - (b.price || 999));
     setPrices(sorted);
 
-    // Calculate stats
     const withPrice = sorted.filter(p => p.price && p.price > 0);
     if (withPrice.length > 0) {
       const minPrice = Math.min(...withPrice.map(p => p.price));
@@ -96,28 +154,65 @@ const Precos = () => {
 
   const startScraping = async () => {
     if (!medida.trim()) {
-      toast.error('Introduza uma medida para fazer scraping');
+      toast.error('Introduza uma ou mais medidas separadas por vírgula');
       return;
     }
 
     setScraping(true);
-    const medidaNorm = medida.replace(/\//g, '').replace(/R/gi, '');
+    setScrapingProgress(null);
+    setJobIds([]);
     
     try {
-      // Start scraping for all active suppliers
-      const promises = suppliers.map(s => 
-        scrapeAPI.enqueue(s.name.toLowerCase(), [medidaNorm])
-          .catch(err => ({ error: err, supplier: s.name }))
-      );
+      // Check worker status and start if needed
+      const { data: workerStatus } = await workerAPI.getStatus();
       
-      const results = await Promise.all(promises);
-      const successful = results.filter(r => !r.error).length;
+      if (!workerStatus.running) {
+        toast.info('A iniciar o worker...');
+        const { data: startResult } = await workerAPI.start();
+        
+        if (!startResult.ok) {
+          toast.error('Erro ao iniciar o worker');
+          setScraping(false);
+          return;
+        }
+        
+        // Wait a bit for worker to fully initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
       
-      toast.success(`Scraping iniciado para ${successful} fornecedores. Aguarde alguns minutos e atualize.`);
+      // Parse sizes (comma-separated)
+      const sizes = medida.split(',').map(s => s.trim()).filter(s => s);
+      
+      if (sizes.length === 0) {
+        toast.error('Nenhuma medida válida');
+        setScraping(false);
+        return;
+      }
+      
+      // Enqueue batch job for all active suppliers
+      const { data } = await scrapeAPI.enqueueBatch(sizes);
+      
+      if (data.ok) {
+        setJobIds(data.job_ids);
+        
+        setScrapingProgress({
+          total: data.jobs_created,
+          completed: 0,
+          failed: 0,
+          running: 0,
+          queued: data.jobs_created,
+          percent: 0,
+          jobs: []
+        });
+        
+        toast.success(`Scraping iniciado: ${data.jobs_created} jobs para ${data.suppliers.length} fornecedores`);
+      } else {
+        toast.error('Erro ao criar jobs de scraping');
+        setScraping(false);
+      }
     } catch (error) {
       console.error('Error starting scraping:', error);
-      toast.error('Erro ao iniciar scraping');
-    } finally {
+      toast.error('Erro ao iniciar scraping: ' + (error.response?.data?.detail || error.message));
       setScraping(false);
     }
   };
@@ -140,9 +235,6 @@ const Precos = () => {
     });
   };
 
-  // Group prices by medida for display
-  const medidas = [...new Set(prices.map(p => p.medida))];
-
   return (
     <div className="space-y-6" data-testid="precos-page">
       {/* Header */}
@@ -159,7 +251,7 @@ const Precos = () => {
           <div className="flex gap-4">
             <div className="flex-1">
               <Input
-                placeholder="Introduza a medida do pneu (ex: 205/55R16 ou 2055516)"
+                placeholder="Medidas separadas por vírgula (ex: 205/55R16, 195/65R15)"
                 value={medida}
                 onChange={(e) => setMedida(e.target.value)}
                 onKeyPress={handleKeyPress}
@@ -180,7 +272,8 @@ const Precos = () => {
               Ver Todos
             </Button>
             <Button 
-              variant="secondary" 
+              variant="default"
+              className="bg-amber-500 hover:bg-amber-600"
               onClick={startScraping} 
               disabled={scraping || !medida.trim()}
               data-testid="scrape-btn"
@@ -193,6 +286,66 @@ const Precos = () => {
               Novo Scraping
             </Button>
           </div>
+          
+          {/* Scraping Progress */}
+          {scraping && scrapingProgress && (
+            <div className="mt-4 p-4 bg-slate-50 rounded-lg border">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Scraping em progresso...
+                </span>
+                <span className="text-sm text-slate-500">
+                  {scrapingProgress.completed} / {scrapingProgress.total} fornecedores
+                </span>
+              </div>
+              
+              <Progress value={scrapingProgress.percent} className="h-2 mb-3" />
+              
+              <div className="flex gap-4 text-sm">
+                <div className="flex items-center gap-1 text-emerald-600">
+                  <CheckCircle className="w-4 h-4" />
+                  {scrapingProgress.completed} concluídos
+                </div>
+                <div className="flex items-center gap-1 text-blue-600">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {scrapingProgress.running} a executar
+                </div>
+                <div className="flex items-center gap-1 text-slate-500">
+                  <Clock className="w-4 h-4" />
+                  {scrapingProgress.queued} em fila
+                </div>
+                {scrapingProgress.failed > 0 && (
+                  <div className="flex items-center gap-1 text-red-600">
+                    <XCircle className="w-4 h-4" />
+                    {scrapingProgress.failed} erros
+                  </div>
+                )}
+              </div>
+              
+              {/* Per-supplier status */}
+              {scrapingProgress.jobs && scrapingProgress.jobs.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {scrapingProgress.jobs.map((job, idx) => (
+                    <Badge 
+                      key={job._id || idx}
+                      variant="outline"
+                      className={
+                        job.status === 'done' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        job.status === 'running' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                        job.status === 'error' ? 'bg-red-50 text-red-700 border-red-200' :
+                        'bg-slate-50 text-slate-500'
+                      }
+                    >
+                      {job.supplier_name || job.supplier_id}
+                      {job.status === 'running' && <Loader2 className="w-3 h-3 ml-1 animate-spin" />}
+                      {job.status === 'done' && <CheckCircle className="w-3 h-3 ml-1" />}
+                      {job.status === 'error' && <XCircle className="w-3 h-3 ml-1" />}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -219,9 +372,8 @@ const Precos = () => {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-sm text-slate-600">Resultados</p>
-                <p className="text-2xl font-bold text-slate-700">{stats.withPrice}</p>
-                <p className="text-xs text-slate-500">de {stats.total} produtos</p>
+                <p className="text-sm text-slate-600">Total Produtos</p>
+                <p className="text-2xl font-semibold text-slate-700">{stats.total}</p>
               </div>
             </div>
           </CardContent>
@@ -231,12 +383,7 @@ const Precos = () => {
       {/* Results Table */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Resultados ({prices.length} produtos)</span>
-            {medidas.length > 1 && (
-              <Badge variant="outline">{medidas.length} medidas diferentes</Badge>
-            )}
-          </CardTitle>
+          <CardTitle>Preços Encontrados ({prices.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -245,63 +392,57 @@ const Precos = () => {
             </div>
           ) : prices.length === 0 ? (
             <div className="text-center py-12 text-slate-500">
-              <Search className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>Nenhum preço encontrado.</p>
-              <p className="text-sm">Introduza uma medida e clique em "Novo Scraping" para obter preços.</p>
+              <p className="text-sm mt-2">Introduza uma medida e clique em "Novo Scraping" para obter preços.</p>
             </div>
           ) : (
             <div className="max-h-[600px] overflow-auto">
               <Table>
-                <TableHeader className="sticky top-0 bg-white">
+                <TableHeader className="sticky top-0 bg-white z-10">
                   <TableRow>
-                    <TableHead className="w-[120px]">Marca</TableHead>
+                    <TableHead>Medida</TableHead>
+                    <TableHead>Marca</TableHead>
                     <TableHead>Modelo</TableHead>
-                    <TableHead className="w-[100px] text-right">Preço</TableHead>
-                    <TableHead className="w-[120px]">Fornecedor</TableHead>
-                    <TableHead className="w-[100px]">Medida</TableHead>
-                    <TableHead className="w-[140px]">Atualizado</TableHead>
+                    <TableHead>Fornecedor</TableHead>
+                    <TableHead className="text-right">Preço</TableHead>
+                    <TableHead>Atualizado</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {prices.map((price, index) => {
-                    const isBest = stats && price.price === stats.minPrice;
-                    const isWorst = stats && price.price === stats.maxPrice;
+                  {prices.map((item, index) => {
+                    const isBest = stats && item.price === stats.minPrice;
                     
                     return (
                       <TableRow 
-                        key={`${price.supplier_name}-${price.medida}-${price.marca}-${index}`}
-                        className={isBest ? 'bg-emerald-50 hover:bg-emerald-100' : isWorst ? 'bg-red-50 hover:bg-red-100' : ''}
+                        key={item._id || index}
+                        className={isBest ? 'bg-emerald-50 hover:bg-emerald-100' : ''}
                         data-testid={`price-row-${index}`}
                       >
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            {price.marca || '-'}
-                            {isBest && (
-                              <Badge className="bg-emerald-500 text-xs">
-                                <TrendingDown className="w-3 h-3 mr-1" />
-                                Melhor
-                              </Badge>
-                            )}
-                          </div>
+                        <TableCell className="font-mono font-medium">{item.medida}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-medium">
+                            {item.marca || '-'}
+                          </Badge>
                         </TableCell>
-                        <TableCell className="text-slate-600 max-w-[300px] truncate" title={price.modelo}>
-                          {price.modelo || '-'}
-                        </TableCell>
-                        <TableCell className="text-right font-bold">
-                          {price.price ? (
-                            <span className={isBest ? 'text-emerald-600' : isWorst ? 'text-red-500' : ''}>
-                              €{price.price.toFixed(2)}
-                            </span>
-                          ) : '-'}
+                        <TableCell className="max-w-[200px] truncate text-slate-600" title={item.modelo}>
+                          {item.modelo || '-'}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">{price.supplier_name}</Badge>
+                          <Badge 
+                            variant={item.supplier_name === stats?.bestSupplier && isBest ? 'default' : 'secondary'}
+                            className={isBest ? 'bg-emerald-600' : ''}
+                          >
+                            {item.supplier_name}
+                          </Badge>
                         </TableCell>
-                        <TableCell className="text-slate-500 font-mono text-sm">
-                          {price.medida}
+                        <TableCell className="text-right">
+                          <span className={`font-bold ${isBest ? 'text-emerald-600 text-lg' : ''}`}>
+                            {isBest && <TrendingDown className="inline w-4 h-4 mr-1" />}
+                            €{item.price?.toFixed(2) || '-'}
+                          </span>
                         </TableCell>
-                        <TableCell className="text-slate-400 text-sm">
-                          {formatDate(price.scraped_at)}
+                        <TableCell className="text-slate-500 text-sm">
+                          {formatDate(item.scraped_at)}
                         </TableCell>
                       </TableRow>
                     );
