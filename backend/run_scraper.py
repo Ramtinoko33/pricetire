@@ -227,17 +227,28 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
                         model = re.sub(r'\s+\d{2,3}[VHWYTQSR]\s*$', '', model)
                         model = model.strip()
                     
-                    # Get price from bestPricesBySource
+                    # Get price from bestPricesBySource - find the LOWEST price across all sources
                     best_prices = tyre.get('bestPricesBySource', {})
                     price = None
+                    all_source_prices = []
                     
-                    # Try different price sources
+                    # Collect prices from all sources
                     for source in ['supplier', 'loadAll', 'central_warehouse', 'my_stock']:
                         source_data = best_prices.get(source, {})
                         best_price = source_data.get('bestPrice', {})
-                        if best_price and best_price.get('purchasePrice'):
-                            price = best_price['purchasePrice']
-                            break
+                        if best_price:
+                            # Try different price fields
+                            source_price = (
+                                best_price.get('purchasePrice') or 
+                                best_price.get('netPurchasePrice') or
+                                best_price.get('grossPurchasePrice')
+                            )
+                            if source_price and source_price > 15 and source_price < 500:
+                                all_source_prices.append(source_price)
+                    
+                    # Use the lowest price found
+                    if all_source_prices:
+                        price = min(all_source_prices)
                     
                     # Skip items without brand - these are incomplete records
                     if brand and price and price > 15 and price < 500:
