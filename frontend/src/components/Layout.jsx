@@ -1,13 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, Database, FileText, Settings, Play, Search, Scale } from 'lucide-react';
+import { LayoutDashboard, Database, FileText, Settings, Play, Search, Scale } from 'lucide-react';
 
 const Layout = ({ children }) => {
   const location = useLocation();
 
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/upload', label: 'Upload', icon: Upload },
     { path: '/suppliers', label: 'Fornecedores', icon: Database },
     { path: '/comparar', label: 'Comparar', icon: Scale },
     { path: '/precos', label: 'Preços', icon: Search },
