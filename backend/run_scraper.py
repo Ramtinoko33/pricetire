@@ -258,7 +258,15 @@ async def scrape_mp24_with_session(page, username: str, password: str, medida: s
                             'price': price
                         })
                 
+                # Consolidate products by brand+model, keeping the LOWEST price for each
                 if products:
+                    consolidated = {}
+                    for p in products:
+                        key = (p['brand'], p['model'])
+                        if key not in consolidated or p['price'] < consolidated[key]['price']:
+                            consolidated[key] = p
+                    
+                    products = list(consolidated.values())
                     result["products"] = products
                     prices = [p['price'] for p in products]
                     result["price"] = min(prices)
